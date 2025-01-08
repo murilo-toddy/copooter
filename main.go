@@ -122,10 +122,16 @@ func (r *Resistor) Act(force bool) (Completed, error) {
 		}
 	}
 	if r.Node1.State == Undefined {
-		r.Node1.Change(r.Node2.State)
+		if !force {
+			return false, nil
+		}
+		return true, r.Node1.Change(r.Node2.State)
 	}
 	if r.Node2.State == Undefined {
-		r.Node2.Change(r.Node1.State)
+		if !force {
+			return false, nil
+		}
+		return true, r.Node2.Change(r.Node1.State)
 	}
 	return true, nil
 }
@@ -152,7 +158,7 @@ func NewTransistor(source, gate, drain *Node) *Transistor {
 // the transistor will short-circuit source and drain if gate is on and isolate
 // them otherwise
 func (t *Transistor) Act(force bool) (Completed, error) {
-	if t.Gate.State == Undefined || (t.Source.State == Undefined && t.Gate.State == Undefined) {
+	if t.Gate.State == Undefined || (t.Source.State == Undefined && t.Drain.State == Undefined) {
 		if !force {
 			return false, nil
 		} else {
@@ -190,7 +196,9 @@ func NewMultimeter(node *Node) *Multimeter {
 }
 
 func (m *Multimeter) Act(force bool) (Completed, error) {
-	fmt.Println(m.Debug())
+	if m.Node.State != Undefined || force {
+		fmt.Println(m.Debug())
+	}
 	return true, nil
 }
 
@@ -230,29 +238,28 @@ func NewCustomComponent(componentType string, subcomponents []Component) *Custom
 	}
 }
 
+// TODO: add execution for custom component, will be needed for chaining executions
 func (c *CustomComponent) Act(force bool) (Completed, error) {
-	for _, subcomponent := range c.Subcomponents {
-		completed, err := subcomponent.Act(force)
-		if err != nil || !completed {
-			return completed, err
-		}
-	}
 	return true, nil
 }
 
 func (c *CustomComponent) Debug() string {
-	panic("CustomComponent.Debug not implemented")
+	return ""
 }
 
 type Circuit struct {
+	debug     bool
 	maxDefers int
 	// components that cannot be deferred (sources, grounds and inputs)
-	terminals  []Component
-	components []Component
+	terminals   []Component
+	resistors   []Component
+	transistors []Component
+	meters      []Component
 }
 
-func NewCircuit(components []Component, maxDefers int) *Circuit {
+func NewCircuit(components []Component, maxDefers int, debug bool) *Circuit {
 	circuit := &Circuit{
+		debug:     debug,
 		maxDefers: maxDefers,
 	}
 	circuit.AddComponents(components...)
@@ -263,8 +270,18 @@ func (c *Circuit) addComponent(component Component) {
 	switch component.(type) {
 	case *Source, *Ground, *Input:
 		c.terminals = append(c.terminals, component)
+	case *Resistor:
+		c.resistors = append(c.resistors, component)
+	case *Transistor:
+		c.transistors = append(c.transistors, component)
+	case *Multimeter:
+		c.meters = append(c.meters, component)
+	case *CustomComponent:
+		for _, subcomponent := range component.(*CustomComponent).Subcomponents {
+			c.addComponent(subcomponent)
+		}
 	default:
-		c.components = append(c.components, component)
+		panic("component type not found")
 	}
 }
 
@@ -279,7 +296,13 @@ func (c *Circuit) AddComponents(components ...Component) {
 func (c *Circuit) tick(components []Component, force bool) ([]Component, error) {
 	deferred := []Component{}
 	for _, component := range components {
+		if c.debug {
+			fmt.Println("before:", component.Debug())
+		}
 		completed, err := component.Act(force)
+		if c.debug {
+			fmt.Println("after: ", component.Debug())
+		}
 		if err != nil {
 			return []Component{}, err
 		}
@@ -290,27 +313,79 @@ func (c *Circuit) tick(components []Component, force bool) ([]Component, error) 
 	return deferred, nil
 }
 
-func (c *Circuit) Simulate() error {
+func (c *Circuit) simulateTicks(components []Component, force bool, maxDefers int) ([]Component, error) {
+	deferred := components
+	var err error
+	for i := range maxDefers {
+		fmt.Println("----- running tick", i, "-------")
+		deferred, err = c.tick(deferred, force)
+		if err != nil {
+			return []Component{}, err
+		}
+		if len(deferred) == 0 {
+			return deferred, nil
+		}
+	}
+	return deferred, nil
+}
+
+func (c *Circuit) resistorHailMary(components []Component) (deferred []Component, err error) {
+	fmt.Println("----- running resistor hail mary -------")
+	for _, component := range components {
+		switch component.(type) {
+		case *Resistor:
+			if c.debug {
+				fmt.Println("before:", component.Debug())
+			}
+			_, err := component.Act(true)
+			if c.debug {
+				fmt.Println("after: ", component.Debug())
+			}
+			if err != nil {
+				return []Component{}, err
+			}
+		default:
+			deferred = append(deferred, component)
+		}
+	}
+	return deferred, nil
+}
+
+// TODO: update function to propagate in queue format instead of running all components at once
+func (c *Circuit) Simulate() (err error) {
 	for _, terminal := range c.terminals {
 		if _, err := terminal.Act(true); err != nil {
 			return err
 		}
 	}
-	deferred := c.components
-	var err error
-	for range c.maxDefers - 1 {
-		deferred, err = c.tick(deferred, false)
-		if err != nil {
-			return err
-		}
-	}
-	deferred, err = c.tick(deferred, true)
+	components := []Component{}
+	components = append(components, c.transistors...)
+	components = append(components, c.resistors...)
+	components, err = c.simulateTicks(components, false, c.maxDefers/2)
 	if err != nil {
 		return err
 	}
-	if len(deferred) > 0 {
+	components, err = c.resistorHailMary(components)
+	if err != nil {
+		return err
+	}
+	components, err = c.simulateTicks(components, false, c.maxDefers/2)
+	if err != nil {
+		return err
+	}
+	components, err = c.tick(components, true)
+	if err != nil {
+		return err
+	}
+	if len(components) > 0 {
 		// TODO: improve error message
 		return fmt.Errorf("there were components that didn't get to a stable position")
+	}
+
+	for _, meter := range c.meters {
+		if _, err := meter.Act(true); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -395,7 +470,7 @@ func NewAndGate(input1, input2 *Node) (*Node, *CustomComponent) {
 //	         ──┴──
 //	          GND
 func NewOrGate(input1, input2 *Node) (*Node, *CustomComponent) {
-	outputNode := NewNode("AndOutput")
+	outputNode := NewNode("OrOutput")
 	return outputNode, &CustomComponent{
 		ComponentType: "AndGate",
 		Subcomponents: []Component{
@@ -403,6 +478,47 @@ func NewOrGate(input1, input2 *Node) (*Node, *CustomComponent) {
 			NewTransistor(SharedSourceNode, input2, outputNode),
 			NewResistor(outputNode, SharedGroundNode),
 		},
+	}
+}
+
+// performs NAND logic for input1 and input2
+//
+//	          Vcc
+//	          ───
+//	           │
+//	           >
+//	           >
+//	           >
+//	           │
+//	           ├───o output
+//	         ┌─┘
+//	input1 o─│
+//	         └─┐
+//	         ┌─┘
+//	input2 o─│
+//	         └─┐
+//	         ──┴──
+//	          GND
+func NewNandGate(input1, input2 *Node) (*Node, *CustomComponent) {
+	intermediateNode := NewNode("NandIntermediate")
+	outputNode := NewNode("NandOutput")
+	return outputNode, &CustomComponent{
+		ComponentType: "NandGate",
+		Subcomponents: []Component{
+			NewResistor(SharedSourceNode, outputNode),
+			NewTransistor(outputNode, input1, intermediateNode),
+			NewTransistor(intermediateNode, input2, SharedGroundNode),
+		},
+	}
+}
+
+func NewXorGate(input1, input2 *Node) (*Node, *CustomComponent) {
+	orOut, orComponent := NewOrGate(input1, input2)
+	nandOut, nandComponent := NewNandGate(input1, input2)
+	outputNode, andComponent := NewAndGate(orOut, nandOut)
+	return outputNode, &CustomComponent{
+		ComponentType: "XorGate",
+		Subcomponents: []Component{orComponent, nandComponent, andComponent},
 	}
 }
 
@@ -414,7 +530,7 @@ func main() {
 	input2 := NewNode("input2")
 	inputComponents := []Component{
 		NewInput(input1, Off),
-		NewInput(input2, Off),
+		NewInput(input2, On),
 	}
 	components = append(components, inputComponents...)
 
@@ -442,8 +558,25 @@ func main() {
 	}
 	components = append(components, orGateComponents...)
 
-	maxDefers := 2
-	circuit := NewCircuit(components, maxDefers)
+	// NAND gate
+	nandOutput, nandGate := NewNandGate(input1, input2)
+	nandGateComponents := []Component{
+		nandGate,
+		NewMultimeter(nandOutput),
+	}
+	components = append(components, nandGateComponents...)
+
+	// XOR gate
+	xorOutput, xorGate := NewXorGate(input1, input2)
+	xorGateComponents := []Component{
+		xorGate,
+		NewMultimeter(xorOutput),
+	}
+	components = append(components, xorGateComponents...)
+
+	maxDefers := 10
+	debug := true
+	circuit := NewCircuit(components, maxDefers, debug)
 	err := circuit.Simulate()
 	if err != nil {
 		fmt.Printf("unable to run simulation: %s\n", err.Error())
