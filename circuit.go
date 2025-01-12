@@ -19,9 +19,9 @@ func NewCircuit(components []Component, maxDefers int, debug bool) *Circuit {
 
 func (c *Circuit) addComponent(component Component) {
 	switch component.(type) {
-	case *Source, *Ground, *Input:
+	case *Terminal:
 		c.terminals = append(c.terminals, component)
-	case *Multimeter:
+	case *Meter:
 		c.meters = append(c.meters, component)
 	default:
 		c.components = append(c.components, component)

@@ -24,15 +24,17 @@ func (n NodeState) String() string {
 }
 
 type Node struct {
-	ID    string
-	State NodeState
+	ID          string
+	State       NodeState
+	connections []*Node
 }
 
 // TODO: determine ID automatically
 func NewNode(id string) *Node {
 	return &Node{
-		ID:    id,
-		State: Undefined,
+		ID:          id,
+		State:       Undefined,
+		connections: []*Node{},
 	}
 }
 
@@ -41,11 +43,23 @@ func (n *Node) Change(newState NodeState) error {
 		return fmt.Errorf("conflicting values for node %s", n.ID)
 	}
 	n.State = newState
+	for _, node := range n.connections {
+		if node.State == newState {
+			continue
+		}
+		node.Change(newState)
+	}
 	return nil
 }
 
 func (n *Node) Debug() string {
 	return fmt.Sprintf("%s=<state: %s>", n.ID, n.State)
+}
+
+func (n *Node) Connect(n1 *Node) *Node {
+	n.connections = append(n.connections, n1)
+	n1.connections = append(n1.connections, n)
+	return n
 }
 
 var SharedSourceNode = NewNode("SharedSource")

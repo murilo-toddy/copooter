@@ -19,7 +19,7 @@ func TestNotGate(t *testing.T) {
 		notOutput, notGate := NewNotGate(input)
 		components = append(components, notGate)
 
-		c := NewCircuit(components, 4, false)
+		c := NewCircuit(components, 4, true)
 		if err := c.Simulate(); err != nil {
 			t.Errorf(err.Error())
 		}

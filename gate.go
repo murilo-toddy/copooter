@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 // performs NOT logic for input
 //
 //	         Vcc
@@ -15,12 +17,13 @@ package main
 //	        ──┴──
 //	         GND
 func NewNotGate(input *Node) (*Node, *CustomComponent) {
-	outputNode := NewNode("NotOutput")
+	parent := "NotGate"
+	outputNode := NewNode(fmt.Sprintf("%s-Output", parent))
 	return outputNode, NewCustomComponent(
 		"NotGate",
 		[]Component{
-			NewTransistor(outputNode, input, SharedGroundNode),
-			NewResistor(SharedSourceNode, outputNode),
+			NewResistor(parent, SharedSourceNode, outputNode),
+			NewTransistor(parent, outputNode, input, SharedGroundNode),
 		},
 		[]*Node{input},
 	)
@@ -45,14 +48,15 @@ func NewNotGate(input *Node) (*Node, *CustomComponent) {
 //	         ──┴──
 //	          GND
 func NewAndGate(input1, input2 *Node) (*Node, *CustomComponent) {
-	intermediateNode := NewNode("AndIntermediate")
-	outputNode := NewNode("AndOutput")
+	parent := "AndGate"
+	intermediateNode := NewNode(fmt.Sprintf("%s-AndIntermediate", parent))
+	outputNode := NewNode(fmt.Sprintf("%s-AndOutput", parent))
 	return outputNode, NewCustomComponent(
 		"AndGate",
 		[]Component{
-			NewTransistor(SharedSourceNode, input1, intermediateNode),
-			NewTransistor(intermediateNode, input2, outputNode),
-			NewResistor(outputNode, SharedGroundNode),
+			NewTransistor(parent, SharedSourceNode, input1, intermediateNode),
+			NewTransistor(parent, intermediateNode, input2, outputNode),
+			NewResistor(parent, outputNode, SharedGroundNode),
 		},
 		[]*Node{input1, input2},
 	)
@@ -75,13 +79,14 @@ func NewAndGate(input1, input2 *Node) (*Node, *CustomComponent) {
 //	         ──┴──
 //	          GND
 func NewOrGate(input1, input2 *Node) (*Node, *CustomComponent) {
-	outputNode := NewNode("OrOutput")
+	parent := "OrGate"
+	outputNode := NewNode(fmt.Sprintf("%s-OrOutput", parent))
 	return outputNode, NewCustomComponent(
 		"OrGate",
 		[]Component{
-			NewTransistor(SharedSourceNode, input1, outputNode),
-			NewTransistor(SharedSourceNode, input2, outputNode),
-			NewResistor(outputNode, SharedGroundNode),
+			NewTransistor(parent, SharedSourceNode, input1, outputNode),
+			NewTransistor(parent, SharedSourceNode, input2, outputNode),
+			NewResistor(parent, outputNode, SharedGroundNode),
 		},
 		[]*Node{input1, input2},
 	)
@@ -106,14 +111,15 @@ func NewOrGate(input1, input2 *Node) (*Node, *CustomComponent) {
 //	         ──┴──
 //	          GND
 func NewNandGate(input1, input2 *Node) (*Node, *CustomComponent) {
+	parent := "NandGate"
 	intermediateNode := NewNode("NandIntermediate")
 	outputNode := NewNode("NandOutput")
 	return outputNode, NewCustomComponent(
 		"NandGate",
 		[]Component{
-			NewTransistor(outputNode, input1, intermediateNode),
-			NewTransistor(intermediateNode, input2, SharedGroundNode),
-			NewResistor(SharedSourceNode, outputNode),
+			NewTransistor(parent, outputNode, input1, intermediateNode),
+			NewTransistor(parent, intermediateNode, input2, SharedGroundNode),
+			NewResistor(parent, SharedSourceNode, outputNode),
 		},
 		[]*Node{input1, input2},
 	)

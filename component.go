@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type ComponentType int
@@ -12,61 +14,91 @@ type Component interface {
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
 	Debug() string
+	Render()
 }
 
-type Source struct {
+type Terminal struct {
+	Node         *Node
+	state        NodeState
+	terminalType string
+}
+
+func NewTerminal(node *Node, state NodeState, terminalType string) *Terminal {
+	return &Terminal{
+		Node:         node,
+		state:        state,
+		terminalType: terminalType,
+	}
+}
+
+func NewSource(node *Node) *Terminal {
+	return NewTerminal(node, On, "Source")
+}
+
+func NewGround(node *Node) *Terminal {
+	return NewTerminal(node, Off, "Ground")
+}
+
+func NewInput(node *Node, state NodeState) *Terminal {
+	return NewTerminal(node, state, "Input")
+}
+
+func (t *Terminal) Ready() bool {
+	return true
+}
+
+func (t *Terminal) Act() error {
+	return t.Node.Change(t.state)
+}
+
+func (t *Terminal) Debug() string {
+	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
+}
+
+func (t *Terminal) Render() {
+}
+
+type Meter struct {
 	Node *Node
 }
 
-func NewSource(node *Node) *Source {
-	return &Source{
+func NewMultimeter(node *Node) *Meter {
+	return &Meter{
 		Node: node,
 	}
 }
 
-func (s *Source) Ready() bool {
+func (m *Meter) Ready() bool {
 	return true
 }
 
-func (s *Source) Act() error {
-	return s.Node.Change(On)
-}
-
-func (s *Source) Debug() string {
-	return fmt.Sprintf("Source<node: %s>", s.Node.Debug())
-}
-
-type Ground struct {
-	Node *Node
-}
-
-func NewGround(node *Node) *Ground {
-	return &Ground{
-		Node: node,
+func (m *Meter) Act() error {
+	if m.Node.State != Undefined {
+		fmt.Println(m.Debug())
 	}
+	return nil
 }
 
-func (g *Ground) Ready() bool {
-	return true
+func (m *Meter) Debug() string {
+	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
-func (g *Ground) Act() error {
-	return g.Node.Change(Off)
-}
-
-func (g *Ground) Debug() string {
-	return fmt.Sprintf("Ground<node: %s>", g.Node.Debug())
+func (m *Meter) Render() {
 }
 
 type Resistor struct {
 	Node1 *Node
 	Node2 *Node
+	image *rl.Image
+	x, y  int32
 }
 
-func NewResistor(node1, node2 *Node) *Resistor {
+func NewResistor(parent string, node1, node2 *Node) *Resistor {
 	return &Resistor{
-		Node1: node1,
-		Node2: node2,
+		Node1: NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
+		Node2: NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
+		x:     100,
+		y:     100,
 	}
 }
 
@@ -91,17 +123,25 @@ func (r *Resistor) Debug() string {
 	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
 }
 
+func (r *Resistor) Render() {
+	rl.DrawTexture(rl.LoadTextureFromImage(r.image), r.x, r.y, rl.White)
+}
+
 type Transistor struct {
 	Source *Node
 	Drain  *Node
 	Gate   *Node
+	image  *rl.Image
+	x, y   int32
 }
 
-func NewTransistor(source, gate, drain *Node) *Transistor {
+func NewTransistor(parent string, source, gate, drain *Node) *Transistor {
 	return &Transistor{
-		Source: source,
-		Drain:  drain,
-		Gate:   gate,
+		Source: NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
+		Drain:  NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
+		Gate:   NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
+		x:      100,
+		y:      500,
 	}
 }
 
@@ -136,53 +176,8 @@ func (t *Transistor) Debug() string {
 		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
 }
 
-type Multimeter struct {
-	Node *Node
-}
-
-func NewMultimeter(node *Node) *Multimeter {
-	return &Multimeter{
-		Node: node,
-	}
-}
-
-func (m *Multimeter) Ready() bool {
-	return true
-}
-
-func (m *Multimeter) Act() error {
-	if m.Node.State != Undefined {
-		fmt.Println(m.Debug())
-	}
-	return nil
-}
-
-func (m *Multimeter) Debug() string {
-	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
-}
-
-type Input struct {
-	Node  *Node
-	Value NodeState
-}
-
-func NewInput(node *Node, value NodeState) *Input {
-	return &Input{
-		Node:  node,
-		Value: value,
-	}
-}
-
-func (i *Input) Ready() bool {
-	return true
-}
-
-func (i *Input) Act() error {
-	return i.Node.Change(i.Value)
-}
-
-func (i *Input) Debug() string {
-	return fmt.Sprintf("Input<node:%s>", i.Node.Debug())
+func (t *Transistor) Render() {
+	rl.DrawTexture(rl.LoadTextureFromImage(t.image), t.x, t.y, rl.White)
 }
 
 type CustomComponent struct {
@@ -240,12 +235,22 @@ func SplitComponents(components []Component) (transistors []Component, resistors
 }
 
 func tick(components []Component) (deferred []Component, err error) {
+	debug := true
 	for _, component := range components {
 		if component.Ready() {
+			if debug {
+				fmt.Println("component ready\n", "before: ", component.Debug())
+			}
 			if err = component.Act(); err != nil {
 				return
 			}
+			if debug {
+				fmt.Println("after: ", component.Debug())
+			}
 		} else {
+			if debug {
+				fmt.Println(component.Debug(), "component not ready")
+			}
 			deferred = append(deferred, component)
 		}
 	}
@@ -292,6 +297,9 @@ func (c *CustomComponent) Debug() string {
 		builder.WriteString(subcomponent.Debug() + "\n")
 	}
 	return builder.String()
+}
+
+func (c *CustomComponent) Render() {
 }
 
 var BaseComponents = []Component{

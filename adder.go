@@ -37,3 +37,14 @@ func NewFullAdder(input1, input2, carryIn *Node) (out, carry *Node, adder *Custo
 	)
 	return
 }
+
+func NewAdderSubtractor(input1, input2, carryIn, operation *Node) (out, carry *Node, component *CustomComponent) {
+	xorOut, xorGate := NewXorGate(input2, operation)
+	out, carry, adder := NewFullAdder(input1, xorOut, carryIn)
+	component = NewCustomComponent(
+		"AdderSubtractor",
+		[]Component{xorGate, adder},
+		[]*Node{input1, input2, carryIn, operation},
+	)
+	return
+}
