@@ -23,6 +23,7 @@ func (n NodeState) String() string {
 	}
 }
 
+// TODO: abstract rendering part
 type Node struct {
 	ID          string
 	State       NodeState

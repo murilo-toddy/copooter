@@ -3,24 +3,29 @@ package main
 import (
 	"fmt"
 	"strings"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type ComponentType int
 
+const (
+	resistorSprite   = "resources/resistor.png"
+	transistorSprite = "resources/transistor.png"
+)
+
+// TODO: remove rendering stuff to separate interface
 type Component interface {
 	Ready() bool
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
 	Debug() string
-	Render()
+	Drawable() *DrawableComponent
 }
 
 type Terminal struct {
 	Node         *Node
 	state        NodeState
 	terminalType string
+	drawable     *DrawableComponent
 }
 
 func NewTerminal(node *Node, state NodeState, terminalType string) *Terminal {
@@ -28,6 +33,7 @@ func NewTerminal(node *Node, state NodeState, terminalType string) *Terminal {
 		Node:         node,
 		state:        state,
 		terminalType: terminalType,
+		drawable:     NewDrawable(0, 0, ""),
 	}
 }
 
@@ -55,16 +61,19 @@ func (t *Terminal) Debug() string {
 	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
 }
 
-func (t *Terminal) Render() {
+func (t *Terminal) Drawable() *DrawableComponent {
+	return t.drawable
 }
 
 type Meter struct {
-	Node *Node
+	Node     *Node
+	drawable *DrawableComponent
 }
 
 func NewMultimeter(node *Node) *Meter {
 	return &Meter{
-		Node: node,
+		Node:     node,
+		drawable: NewDrawable(0, 0, ""),
 	}
 }
 
@@ -83,22 +92,21 @@ func (m *Meter) Debug() string {
 	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
-func (m *Meter) Render() {
+func (m *Meter) Drawable() *DrawableComponent {
+	return m.drawable
 }
 
 type Resistor struct {
-	Node1 *Node
-	Node2 *Node
-	image *rl.Image
-	x, y  int32
+	Node1    *Node
+	Node2    *Node
+	drawable *DrawableComponent
 }
 
 func NewResistor(parent string, node1, node2 *Node) *Resistor {
 	return &Resistor{
-		Node1: NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
-		Node2: NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
-		x:     100,
-		y:     100,
+		Node1:    NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
+		Node2:    NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
+		drawable: NewDrawable(200, 100, resistorSprite),
 	}
 }
 
@@ -123,25 +131,23 @@ func (r *Resistor) Debug() string {
 	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
 }
 
-func (r *Resistor) Render() {
-	rl.DrawTexture(rl.LoadTextureFromImage(r.image), r.x, r.y, rl.White)
+func (r *Resistor) Drawable() *DrawableComponent {
+	return r.drawable
 }
 
 type Transistor struct {
-	Source *Node
-	Drain  *Node
-	Gate   *Node
-	image  *rl.Image
-	x, y   int32
+	Source   *Node
+	Drain    *Node
+	Gate     *Node
+	drawable *DrawableComponent
 }
 
 func NewTransistor(parent string, source, gate, drain *Node) *Transistor {
 	return &Transistor{
-		Source: NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
-		Drain:  NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
-		Gate:   NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
-		x:      100,
-		y:      500,
+		Source:   NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
+		Drain:    NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
+		Gate:     NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
+		drawable: NewDrawable(200, 400, transistorSprite),
 	}
 }
 
@@ -176,8 +182,8 @@ func (t *Transistor) Debug() string {
 		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
 }
 
-func (t *Transistor) Render() {
-	rl.DrawTexture(rl.LoadTextureFromImage(t.image), t.x, t.y, rl.White)
+func (t *Transistor) Drawable() *DrawableComponent {
+	return t.drawable
 }
 
 type CustomComponent struct {
@@ -185,6 +191,7 @@ type CustomComponent struct {
 	Subcomponents []Component
 	Inputs        []*Node
 	maxDefers     int
+	drawable      *DrawableComponent
 }
 
 func NewCustomComponent(componentType string, subcomponents []Component, inputs []*Node) *CustomComponent {
@@ -193,6 +200,7 @@ func NewCustomComponent(componentType string, subcomponents []Component, inputs 
 		Subcomponents: subcomponents,
 		Inputs:        inputs,
 		maxDefers:     4,
+		drawable:      NewDrawable(0, 0, ""),
 	}
 }
 
@@ -203,6 +211,10 @@ func (c *CustomComponent) Ready() bool {
 		}
 	}
 	return true
+}
+
+func (c *CustomComponent) Drawable() *DrawableComponent {
+	return c.drawable
 }
 
 func (c *CustomComponent) runSubcomponents(subcomponents []Component) (notExecutedComponents []Component, err error) {
@@ -235,7 +247,7 @@ func SplitComponents(components []Component) (transistors []Component, resistors
 }
 
 func tick(components []Component) (deferred []Component, err error) {
-	debug := true
+	debug := false
 	for _, component := range components {
 		if component.Ready() {
 			if debug {
@@ -297,9 +309,6 @@ func (c *CustomComponent) Debug() string {
 		builder.WriteString(subcomponent.Debug() + "\n")
 	}
 	return builder.String()
-}
-
-func (c *CustomComponent) Render() {
 }
 
 var BaseComponents = []Component{
