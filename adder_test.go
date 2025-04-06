@@ -28,7 +28,7 @@ func TestSimpleAdder(t *testing.T) {
 		components = append(components, adder)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if adderOut.State != tc.expectedOut || adderCarry.State != tc.expectedCarry {
@@ -71,7 +71,7 @@ func TestFullAdder(t *testing.T) {
 		components = append(components, adder)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if adderOut.State != tc.expectedOut || adderCarry.State != tc.expectedCarry {
@@ -127,7 +127,7 @@ func TestAdderSubtractor(t *testing.T) {
 		components = append(components, adder)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if adderOut.State != tc.expectedOut || adderCarry.State != tc.expectedCarry {

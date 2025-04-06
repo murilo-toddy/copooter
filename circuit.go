@@ -34,7 +34,7 @@ func (c *Circuit) AddComponents(components ...Component) {
 	}
 }
 
-func (c *Circuit) Simulate() (err error) {
+func (c *Circuit) Tick() (err error) {
 	for _, terminal := range c.terminals {
 		if err := terminal.Act(); err != nil {
 			return err
