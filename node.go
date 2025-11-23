@@ -58,8 +58,10 @@ func (n *Node) Debug() string {
 }
 
 func (n *Node) Connect(n1 *Node) *Node {
-	n.connections = append(n.connections, n1)
-	n1.connections = append(n1.connections, n)
+	if n1 != nil {
+		n.connections = append(n.connections, n1)
+		n1.connections = append(n1.connections, n)
+	}
 	return n
 }
 

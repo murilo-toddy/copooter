@@ -7,11 +7,6 @@ import (
 
 type ComponentType int
 
-const (
-	resistorSprite   = "resources/resistor.png"
-	transistorSprite = "resources/transistor.png"
-)
-
 type Component interface {
 	Ready() bool
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
@@ -58,12 +53,12 @@ func (t *Terminal) Debug() string {
 }
 
 type Meter struct {
-	Node     *Node
+	Node *Node
 }
 
 func NewMultimeter(node *Node) *Meter {
 	return &Meter{
-		Node:     node,
+		Node: node,
 	}
 }
 
@@ -73,9 +68,9 @@ func (m *Meter) Ready() bool {
 
 func (m *Meter) Act() error {
 	if m.Node.State == Undefined {
-        fmt.Println("WARN: acting on ", m.Debug(), " in undefined state")
+		fmt.Println("WARN: acting on ", m.Debug(), " in undefined state")
 	}
-    fmt.Println(m.Debug())
+	fmt.Println(m.Debug())
 	return nil
 }
 
@@ -84,14 +79,14 @@ func (m *Meter) Debug() string {
 }
 
 type Resistor struct {
-	Node1    *Node
-	Node2    *Node
+	Node1 *Node
+	Node2 *Node
 }
 
 func NewResistor(parent string, node1, node2 *Node) *Resistor {
 	return &Resistor{
-		Node1:    NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
-		Node2:    NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
+		Node1: NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
+		Node2: NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
 	}
 }
 
@@ -117,16 +112,16 @@ func (r *Resistor) Debug() string {
 }
 
 type Transistor struct {
-	Source   *Node
-	Drain    *Node
-	Gate     *Node
+	Source *Node
+	Drain  *Node
+	Gate   *Node
 }
 
 func NewTransistor(parent string, source, gate, drain *Node) *Transistor {
 	return &Transistor{
-		Source:   NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
-		Drain:    NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
-		Gate:     NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
+		Source: NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
+		Drain:  NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
+		Gate:   NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
 	}
 }
 
@@ -138,7 +133,7 @@ func (t *Transistor) Ready() bool {
 // the transistor will short-circuit source and drain if gate is on and isolate
 // them otherwise
 func (t *Transistor) Act() error {
-    if !t.Ready() {
+	if !t.Ready() {
 		return fmt.Errorf("component %s was executed before it was ready", t.Debug())
 	}
 	if t.Gate.State != On {
