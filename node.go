@@ -65,5 +65,32 @@ func (n *Node) Connect(n1 *Node) *Node {
 	return n
 }
 
+func removeFromList(l []*Node, e *Node) []*Node {
+	for i, el := range l {
+		if el == e {
+			l[i] = l[len(l)-1]
+			return l[:len(l)-1]
+		}
+	}
+	return l
+}
+
+// TODO: update node data structure to favor disconnections
+func (n *Node) Disconnect(n1 *Node) *Node {
+	if n1 != nil {
+		n.connections = removeFromList(n.connections, n1)
+		n1.connections = removeFromList(n1.connections, n)
+	}
+	return n
+}
+
+func (n *Node) DisconnectAll() *Node {
+	for _, n1 := range n.connections {
+		// also clears 'n' connections
+		n1.Disconnect(n)
+	}
+	return n
+}
+
 var SharedSourceNode = NewNode("SharedSource")
 var SharedGroundNode = NewNode("SharedGround")

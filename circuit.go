@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 type Circuit struct {
 	debug      bool
 	maxDefers  int
@@ -20,10 +22,13 @@ func NewCircuit(components []Component, maxDefers int, debug bool) *Circuit {
 func (c *Circuit) addComponent(component Component) {
 	switch component.(type) {
 	case *Terminal:
+		fmt.Println("adding terminal ", component.Debug())
 		c.terminals = append(c.terminals, component)
 	case *Meter:
+		fmt.Println("adding meter ", component.Debug())
 		c.meters = append(c.meters, component)
 	default:
+		fmt.Println("adding other ", component.Debug())
 		c.components = append(c.components, component)
 	}
 }
