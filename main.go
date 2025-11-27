@@ -52,6 +52,7 @@ type DrawingState struct {
 	state             State
 	toolkitComponents []DrawableComponent
 	components        []DrawableComponent
+	nextComponentID   int
 
 	draggingComponent *DrawableComponent
 	selectedComponent *DrawableComponent
@@ -104,16 +105,19 @@ type DrawableTerminal struct {
 }
 
 type DrawableComponent struct {
-	Name         string
-	Resource     rl.Texture2D
-	ResourceName string
-	X            int32
-	Y            int32
-	terminals    []*DrawableTerminal
+	ID                   string
+	Name                 string
+	idleResource         rl.Texture2D
+	idleResourceName     string
+	selectedResource     rl.Texture2D
+	selectedResourceName string
+	X                    int32
+	Y                    int32
+	terminals            []*DrawableTerminal
 	Component
 }
 
-func cloneComponent(c *DrawableComponent) {
+func createComponent(c *DrawableComponent) {
 	// TODO: select component based on type enum instead of name
 	// At this point, name is already updated to contain index,
 	// this should also be a field inside DrawableComponent struct
@@ -161,10 +165,18 @@ func addComponent(s *DrawingState, c DrawableComponent) {
 		}
 	}
 	c.Name = fmt.Sprintf("%s %d", c.Name, n)
+
+	// Copy terminal pointers
+	originalTerminals := c.terminals
+	c.terminals = make([]*DrawableTerminal, len(originalTerminals))
+	for i, term := range originalTerminals {
+		termCopy := *term
+		c.terminals[i] = &termCopy
+	}
+
 	// Ensure new nodes are created once component is dropped
-	// TODO: defer component creation to this point of execution,
-	// toolbox components do not need Component interface implementation
-	cloneComponent(&c)
+	createComponent(&c)
+	setComponentID(s, &c)
 	s.components = append(s.components, c)
 }
 
@@ -175,7 +187,7 @@ func checkToolkitComponentSelected(s *DrawingState, pos rl.Vector2) {
 			componentIndex := int32(pos.Y) / toolkitComponentBoxSize
 			if componentIndex < int32(len(s.toolkitComponents)) {
 				selectedComponent := s.toolkitComponents[componentIndex]
-				selectedComponent.Resource = loadTextureWithSize(selectedComponent.ResourceName, gridComponentImageSize, gridComponentImageSize)
+				selectedComponent.idleResource = loadTextureWithSize(selectedComponent.idleResourceName, gridComponentImageSize, gridComponentImageSize)
 				// enter dragging state
 				s.draggingComponent = &selectedComponent
 				s.state = StateDragging
@@ -243,6 +255,7 @@ func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
 func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent == nil {
+			fmt.Println("Attempting to connect terminal but selected component is nil")
 			return
 		}
 		selectedTerminal := s.selectedComponent.terminals[*s.selectedTerminal]
@@ -250,7 +263,6 @@ func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
 			for termIndex, term := range component.terminals {
 				if isInsideTerminal(pos, component, *term) {
 					selectedTerminal.Node.Connect(term.Node)
-					// TODO: move to separate function
 					selectedTerminal.connections = append(selectedTerminal.connections, &DrawableConnection{component, termIndex})
 					term.connections = append(term.connections, &DrawableConnection{*s.selectedComponent, *s.selectedTerminal})
 					return
@@ -272,8 +284,7 @@ func checkRemoveConnections(s *DrawingState) {
 			// TODO: use a more suitable data structure
 			for _, connTerm := range conn.component.terminals {
 				for i, connTermConnection := range connTerm.connections {
-					// TODO: do not compare on name
-					if connTermConnection.component.Name == s.selectedComponent.Name && connTermConnection.termIndex == *s.selectedTerminal {
+					if connTermConnection.component.ID == s.selectedComponent.ID && connTermConnection.termIndex == *s.selectedTerminal {
 						connTerm.connections[i] = connTerm.connections[len(connTerm.connections)-1]
 						connTerm.connections = connTerm.connections[:len(connTerm.connections)-1]
 					}
@@ -294,16 +305,19 @@ func checkPlayButtonSelected(s *DrawingState, pos rl.Vector2) {
 	}
 }
 
-func loadTextureWithSize(resourcePath string, width, height int32) rl.Texture2D {
-	image := rl.LoadImage(resourcePath)
-	rl.ImageResize(image, width, height)
-	return rl.LoadTextureFromImage(image)
+func loadTextureWithSize(resourcePath string, width, height int32) (t rl.Texture2D) {
+	if resourcePath != "" {
+		image := rl.LoadImage(resourcePath)
+		rl.ImageResize(image, width, height)
+		t = rl.LoadTextureFromImage(image)
+	}
+	return
 }
 
 func drawComponentsToolbox(drawableComponents []DrawableComponent) {
 	rl.DrawRectangle(0, 0, toolkitSidebarSize, height, rl.NewColor(48, 48, 48, 255))
 	for i, component := range drawableComponents {
-		rl.DrawTexture(component.Resource, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitComponentPadding/2, rl.White)
+		rl.DrawTexture(component.idleResource, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitComponentPadding/2, rl.White)
 		rl.DrawText(component.Name, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitSidebarSize, toolkitComponentNameFontSize, rl.White)
 	}
 }
@@ -326,14 +340,19 @@ func drawSchematicComponents(components []DrawableComponent) {
 		if component.X == 0 && component.Y == 0 {
 			continue
 		}
-		rl.DrawTexture(component.Resource, component.X, component.Y, rl.White)
+		rl.DrawTexture(component.idleResource, component.X, component.Y, rl.White)
 		rl.DrawText(component.Name, component.X, component.Y+gridComponentImageSize, gridComponentFontSize, rl.White)
 		for _, term := range component.terminals {
 			termX, termY := getTerminalCoordinates(component, *term)
 			for _, conn := range term.connections {
 				connX, connY := getTerminalCoordinates(conn.component, *conn.component.terminals[conn.termIndex])
-				rl.DrawLine(int32(termX), int32(termY), int32(termX), int32(connY), rl.White)
-				rl.DrawLine(int32(termX), int32(connY), int32(connX), int32(connY), rl.White)
+				if termX > connX {
+					rl.DrawLine(int32(termX), int32(termY), int32(termX), int32(connY), rl.White)
+					rl.DrawLine(int32(termX), int32(connY), int32(connX), int32(connY), rl.White)
+				} else {
+					rl.DrawLine(int32(termX), int32(termY), int32(connX), int32(termY), rl.White)
+					rl.DrawLine(int32(connX), int32(termY), int32(connX), int32(connY), rl.White)
+				}
 			}
 		}
 	}
@@ -392,71 +411,20 @@ func drawPlayButton() {
 	)
 }
 
-func NewDrawableResistor(resourceName string) DrawableComponent {
-	name := "Resistor"
-	return DrawableComponent{
-		Name:         name,
-		ResourceName: resourceName,
-		Resource:     loadTextureWithSize(resourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		terminals: []*DrawableTerminal{
-			{OffsetX: 0.07, OffsetY: 0.5},
-			{OffsetX: 0.93, OffsetY: 0.5},
-		},
-		Component: NewResistor(name, nil, nil),
-	}
+func setComponentID(s *DrawingState, c *DrawableComponent) {
+	c.ID = fmt.Sprintf("%d", s.nextComponentID)
+	fmt.Println("adding component ", c.Name, " with ID ", c.ID)
+	s.nextComponentID += 1
 }
 
-func NewDrawableTransistor(resourceName string) DrawableComponent {
-	name := "Transistor"
+func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, terminals []*DrawableTerminal) DrawableComponent {
 	return DrawableComponent{
-		Name:         name,
-		ResourceName: resourceName,
-		Resource:     loadTextureWithSize(resourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		terminals: []*DrawableTerminal{
-			{OffsetX: 0.6, OffsetY: 0.05},
-			{OffsetX: 0.05, OffsetY: 0.5},
-			{OffsetX: 0.6, OffsetY: 0.95},
-		},
-		Component: NewTransistor(name, nil, nil, nil),
-	}
-}
-
-func NewDrawableMultimeter(resourceName string) DrawableComponent {
-	name := "Multimeter"
-	return DrawableComponent{
-		Name:         "Multimeter",
-		ResourceName: resourceName,
-		Resource:     loadTextureWithSize(resourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		terminals: []*DrawableTerminal{
-			{OffsetX: 0.3, OffsetY: 0.5},
-		},
-		Component: NewMultimeter(name, nil),
-	}
-}
-
-func NewDrawableSource(resourceName string) DrawableComponent {
-	name := "Source"
-	return DrawableComponent{
-		Name:         name,
-		ResourceName: resourceName,
-		Resource:     loadTextureWithSize(resourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		terminals: []*DrawableTerminal{
-			{OffsetX: 0.5, OffsetY: 0.05},
-		},
-		Component: NewSource(name, nil),
-	}
-}
-
-func NewDrawableGround(resourceName string) DrawableComponent {
-	name := "Ground"
-	return DrawableComponent{
-		Name:         name,
-		ResourceName: resourceName,
-		Resource:     loadTextureWithSize(resourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		terminals: []*DrawableTerminal{
-			{OffsetX: 0.5, OffsetY: 0.1},
-		},
-		Component: NewGround(name, nil),
+		Name:                 name,
+		idleResourceName:     idleResourceName,
+		idleResource:         loadTextureWithSize(idleResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
+		selectedResource:     loadTextureWithSize(selectedResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
+		selectedResourceName: selectedResourceName,
+		terminals:            terminals,
 	}
 }
 
@@ -467,16 +435,49 @@ func main() {
 	s := DrawingState{
 		state: StateIdle,
 		toolkitComponents: []DrawableComponent{
-			NewDrawableResistor("./resources/resistor.png"),
-			NewDrawableTransistor("./resources/transistor.jpg"),
-			NewDrawableSource("./resources/source.png"),
-			NewDrawableGround("./resources/ground.png"),
-			NewDrawableMultimeter("./resources/meter.jpg"),
+			NewDrawableComponent(
+				"Resistor",
+				"./resources/resistor.png", "./resources/resistor-selected.png",
+				[]*DrawableTerminal{
+					{OffsetX: 0.0, OffsetY: 0.5},
+					{OffsetX: 1.0, OffsetY: 0.5},
+				},
+			),
+			NewDrawableComponent(
+				"Transistor",
+				"./resources/transistor.jpg", "",
+				[]*DrawableTerminal{
+					{OffsetX: 0.6, OffsetY: 0.05},
+					{OffsetX: 0.05, OffsetY: 0.5},
+					{OffsetX: 0.6, OffsetY: 0.95},
+				},
+			),
+			NewDrawableComponent(
+				"Source",
+				"./resources/source.png", "",
+				[]*DrawableTerminal{
+					{OffsetX: 0.5, OffsetY: 0.05},
+				},
+			),
+			NewDrawableComponent(
+				"Ground",
+				"./resources/ground.png", "",
+				[]*DrawableTerminal{
+					{OffsetX: 0.5, OffsetY: 0.05},
+				},
+			),
+			NewDrawableComponent(
+				"Multimeter",
+				"./resources/meter.jpg", "",
+				[]*DrawableTerminal{
+					{OffsetX: 0.3, OffsetY: 0.5},
+				},
+			),
 		},
 	}
 
 	for _, component := range s.toolkitComponents {
-		defer rl.UnloadTexture(component.Resource)
+		defer rl.UnloadTexture(component.idleResource)
 	}
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
@@ -510,19 +511,29 @@ func main() {
 		case StateDragging:
 			offset := toolkitComponentImageSize / 2
 			x, y := int32(mousePos.X)-offset, int32(mousePos.Y)-offset
-			rl.DrawTexture(s.draggingComponent.Resource, x, y, rl.White)
+			rl.DrawTexture(s.draggingComponent.idleResource, x, y, rl.White)
 		case StateComponentSelected:
-			drawComponentOutline(*s.selectedComponent, rl.Yellow)
-			rl.DrawRectangleLines(s.selectedComponent.X, s.selectedComponent.Y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
+			if s.selectedComponent.selectedResourceName != "" {
+				if s.selectedComponent.selectedResource.ID <= 0 {
+					s.selectedComponent.selectedResource = loadTextureWithSize(
+						s.selectedComponent.selectedResourceName,
+						gridComponentImageSize,
+						gridComponentImageSize,
+					)
+				}
+				rl.DrawTexture(s.selectedComponent.selectedResource, s.selectedComponent.X, s.selectedComponent.Y, rl.White)
+			} else {
+				drawComponentOutline(*s.selectedComponent, rl.Yellow)
+				rl.DrawRectangleLines(s.selectedComponent.X, s.selectedComponent.Y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
+			}
 			for _, term := range s.selectedComponent.terminals {
 				drawTerminal(*s.selectedComponent, *term, rl.Red)
 			}
 		case StateTerminalSelected:
 			for _, component := range s.components {
-				// TODO: update to check value and not reference
 				for termIndex, term := range component.terminals {
 					var color rl.Color
-					if component.Name == s.selectedComponent.Name && termIndex == *s.selectedTerminal {
+					if component.ID == s.selectedComponent.ID && termIndex == *s.selectedTerminal {
 						color = rl.Blue
 					} else {
 						color = rl.Red
