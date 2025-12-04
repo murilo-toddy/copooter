@@ -7,46 +7,42 @@ import (
 
 type ComponentType int
 
-const (
-	resistorSprite   = "resources/resistor.png"
-	transistorSprite = "resources/transistor.png"
-)
-
-// TODO: remove rendering stuff to separate interface
 type Component interface {
+	Reset()
 	Ready() bool
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
 	Debug() string
-	Drawable() *DrawableComponent
 }
 
 type Terminal struct {
 	Node         *Node
 	state        NodeState
 	terminalType string
-	drawable     *DrawableComponent
 }
 
-func NewTerminal(node *Node, state NodeState, terminalType string) *Terminal {
+func NewTerminal(name string, node *Node, state NodeState, terminalType string) *Terminal {
 	return &Terminal{
-		Node:         node,
+		Node:         NewNode(fmt.Sprintf("%s-Node", name)).Connect(node),
 		state:        state,
 		terminalType: terminalType,
-		drawable:     NewDrawable(0, 0, ""),
 	}
 }
 
-func NewSource(node *Node) *Terminal {
-	return NewTerminal(node, On, "Source")
+func NewSource(name string, node *Node) *Terminal {
+	return NewTerminal(name, node, On, "Source")
 }
 
-func NewGround(node *Node) *Terminal {
-	return NewTerminal(node, Off, "Ground")
+func NewGround(name string, node *Node) *Terminal {
+	return NewTerminal(name, node, Off, "Ground")
 }
 
-func NewInput(node *Node, state NodeState) *Terminal {
-	return NewTerminal(node, state, "Input")
+func NewInput(name string, node *Node, state NodeState) *Terminal {
+	return NewTerminal(name, node, state, "Input")
+}
+
+func (t *Terminal) Reset() {
+	t.Node.State = Undefined
 }
 
 func (t *Terminal) Ready() bool {
@@ -61,20 +57,18 @@ func (t *Terminal) Debug() string {
 	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
 }
 
-func (t *Terminal) Drawable() *DrawableComponent {
-	return t.drawable
-}
-
 type Meter struct {
-	Node     *Node
-	drawable *DrawableComponent
+	Node *Node
 }
 
-func NewMultimeter(node *Node) *Meter {
+func NewMultimeter(name string, node *Node) *Meter {
 	return &Meter{
-		Node:     node,
-		drawable: NewDrawable(0, 0, ""),
+		Node: NewNode(fmt.Sprintf("%s-Node", name)).Connect(node),
 	}
+}
+
+func (m *Meter) Reset() {
+	m.Node.State = Undefined
 }
 
 func (m *Meter) Ready() bool {
@@ -82,9 +76,10 @@ func (m *Meter) Ready() bool {
 }
 
 func (m *Meter) Act() error {
-	if m.Node.State != Undefined {
-		fmt.Println(m.Debug())
+	if m.Node.State == Undefined {
+		fmt.Println("WARN: acting on ", m.Debug(), " in undefined state")
 	}
+	fmt.Println(m.Debug())
 	return nil
 }
 
@@ -92,22 +87,21 @@ func (m *Meter) Debug() string {
 	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
-func (m *Meter) Drawable() *DrawableComponent {
-	return m.drawable
-}
-
 type Resistor struct {
-	Node1    *Node
-	Node2    *Node
-	drawable *DrawableComponent
+	Node1 *Node
+	Node2 *Node
 }
 
-func NewResistor(parent string, node1, node2 *Node) *Resistor {
+func NewResistor(name string, node1, node2 *Node) *Resistor {
 	return &Resistor{
-		Node1:    NewNode(fmt.Sprintf("%s-Resistor-Node1", parent)).Connect(node1),
-		Node2:    NewNode(fmt.Sprintf("%s-Resistor-Node2", parent)).Connect(node2),
-		drawable: NewDrawable(200, 100, resistorSprite),
+		Node1: NewNode(fmt.Sprintf("%s-Node1", name)).Connect(node1),
+		Node2: NewNode(fmt.Sprintf("%s-Node2", name)).Connect(node2),
 	}
+}
+
+func (r *Resistor) Reset() {
+	r.Node1.State = Undefined
+	r.Node2.State = Undefined
 }
 
 func (r *Resistor) Ready() bool {
@@ -115,7 +109,7 @@ func (r *Resistor) Ready() bool {
 }
 
 func (r *Resistor) Act() error {
-	if r.Node1.State == Undefined && r.Node2.State == Undefined {
+	if !r.Ready() {
 		return fmt.Errorf("component %s was executed before it was ready", r.Debug())
 	}
 	if r.Node1.State == Undefined {
@@ -131,24 +125,24 @@ func (r *Resistor) Debug() string {
 	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
 }
 
-func (r *Resistor) Drawable() *DrawableComponent {
-	return r.drawable
-}
-
 type Transistor struct {
-	Source   *Node
-	Drain    *Node
-	Gate     *Node
-	drawable *DrawableComponent
+	Source *Node
+	Drain  *Node
+	Gate   *Node
 }
 
-func NewTransistor(parent string, source, gate, drain *Node) *Transistor {
+func NewTransistor(name string, source, gate, drain *Node) *Transistor {
 	return &Transistor{
-		Source:   NewNode(fmt.Sprintf("%s-Transistor-Source", parent)).Connect(source),
-		Drain:    NewNode(fmt.Sprintf("%s-Transistor-Drain", parent)).Connect(drain),
-		Gate:     NewNode(fmt.Sprintf("%s-Transistor-Gate", parent)).Connect(gate),
-		drawable: NewDrawable(200, 400, transistorSprite),
+		Source: NewNode(fmt.Sprintf("%s-Source", name)).Connect(source),
+		Drain:  NewNode(fmt.Sprintf("%s-Drain", name)).Connect(drain),
+		Gate:   NewNode(fmt.Sprintf("%s-Gate", name)).Connect(gate),
 	}
+}
+
+func (t *Transistor) Reset() {
+	t.Source.State = Undefined
+	t.Drain.State = Undefined
+	t.Gate.State = Undefined
 }
 
 func (t *Transistor) Ready() bool {
@@ -159,7 +153,7 @@ func (t *Transistor) Ready() bool {
 // the transistor will short-circuit source and drain if gate is on and isolate
 // them otherwise
 func (t *Transistor) Act() error {
-	if t.Gate.State == Undefined || (t.Source.State == Undefined && t.Drain.State == Undefined) {
+	if !t.Ready() {
 		return fmt.Errorf("component %s was executed before it was ready", t.Debug())
 	}
 	if t.Gate.State != On {
@@ -182,16 +176,11 @@ func (t *Transistor) Debug() string {
 		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
 }
 
-func (t *Transistor) Drawable() *DrawableComponent {
-	return t.drawable
-}
-
 type CustomComponent struct {
 	ComponentType string
 	Subcomponents []Component
 	Inputs        []*Node
 	maxDefers     int
-	drawable      *DrawableComponent
 }
 
 func NewCustomComponent(componentType string, subcomponents []Component, inputs []*Node) *CustomComponent {
@@ -200,7 +189,12 @@ func NewCustomComponent(componentType string, subcomponents []Component, inputs 
 		Subcomponents: subcomponents,
 		Inputs:        inputs,
 		maxDefers:     4,
-		drawable:      NewDrawable(0, 0, ""),
+	}
+}
+
+func (c *CustomComponent) Reset() {
+	for _, s := range c.Subcomponents {
+		s.Reset()
 	}
 }
 
@@ -211,10 +205,6 @@ func (c *CustomComponent) Ready() bool {
 		}
 	}
 	return true
-}
-
-func (c *CustomComponent) Drawable() *DrawableComponent {
-	return c.drawable
 }
 
 func (c *CustomComponent) runSubcomponents(subcomponents []Component) (notExecutedComponents []Component, err error) {
@@ -234,11 +224,11 @@ func (c *CustomComponent) runSubcomponents(subcomponents []Component) (notExecut
 // []*Transistor to []Component for some reason (or maybe I'm just dumb)
 func SplitComponents(components []Component) (transistors []Component, resistors []Component, others []Component) {
 	for _, component := range components {
-		switch component.(type) {
+		switch component := component.(type) {
 		case *Transistor:
-			transistors = append(transistors, component.(*Transistor))
+			transistors = append(transistors, component)
 		case *Resistor:
-			resistors = append(resistors, component.(*Resistor))
+			resistors = append(resistors, component)
 		default:
 			others = append(others, component)
 		}
@@ -247,7 +237,7 @@ func SplitComponents(components []Component) (transistors []Component, resistors
 }
 
 func tick(components []Component) (deferred []Component, err error) {
-	debug := false
+	debug := true
 	for _, component := range components {
 		if component.Ready() {
 			if debug {
@@ -294,6 +284,9 @@ func ActComponents(components []Component, maxDefers int) (err error) {
 		}
 		deferredComponents = append(transistors, others...)
 		deferredComponents = append(deferredComponents, resistors...)
+		if len(deferredComponents) == 0 {
+			break
+		}
 	}
 	return
 }
@@ -312,6 +305,6 @@ func (c *CustomComponent) Debug() string {
 }
 
 var BaseComponents = []Component{
-	NewSource(SharedSourceNode),
-	NewGround(SharedGroundNode),
+	NewSource("SharedSource", SharedSourceNode),
+	NewGround("SharedGround", SharedGroundNode),
 }

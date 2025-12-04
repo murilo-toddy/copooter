@@ -20,7 +20,7 @@ func TestNotGate(t *testing.T) {
 		components = append(components, notGate)
 
 		c := NewCircuit(components, 4, true)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if notOutput.State != tc.expectedOutput {
@@ -55,7 +55,7 @@ func TestAndGate(t *testing.T) {
 		components = append(components, andGate)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if andOutput.State != tc.expectedOutput {
@@ -90,7 +90,7 @@ func TestOrGate(t *testing.T) {
 		components = append(components, orGate)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if orOutput.State != tc.expectedOutput {
@@ -125,7 +125,7 @@ func TestNandGate(t *testing.T) {
 		components = append(components, nandGate)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if nandOutput.State != tc.expectedOutput {
@@ -160,7 +160,7 @@ func TestXorGate(t *testing.T) {
 		components = append(components, xorGate)
 
 		c := NewCircuit(components, 4, false)
-		if err := c.Simulate(); err != nil {
+		if err := c.Tick(); err != nil {
 			t.Errorf(err.Error())
 		}
 		if xorOutput.State != tc.expectedOutput {
@@ -182,7 +182,7 @@ func TestChainingGates(t *testing.T) {
 	components = append(components, []Component{notGate, xorGate, andGate, orGate, nandGate}...)
 
 	c := NewCircuit(components, 10, false)
-	if err := c.Simulate(); err != nil {
+	if err := c.Tick(); err != nil {
 		t.Errorf(err.Error())
 	}
 	if notOut.State != Off {
