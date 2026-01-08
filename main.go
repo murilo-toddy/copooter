@@ -18,10 +18,11 @@ var (
 )
 
 var (
-	gridCellSize                = int32(20)
-	gridComponentImageSize      = gridCellSize * 5
+	gridCellSize                = int32(10)
+	gridComponentImageSize      = gridCellSize * 10
 	gridComponentFontSize       = int32(8)
 	gridComponentTerminalRadius = float32(5.0)
+	gridWireWidth               = int32(4)
 )
 
 var (
@@ -96,17 +97,30 @@ type DrawableConnection struct {
 	termIndex int
 }
 
+type Direction int
+
+const (
+	Up Direction = iota
+	Right
+	Down
+	Left
+)
+
 type DrawableTerminal struct {
 	OffsetX float32
 	OffsetY float32
 	Node    *Node
 	// TODO: integrate with node flow
 	connections []*DrawableConnection
+	// Used to render wires correctly
+	pointingDirection Direction
 }
 
 type DrawableComponent struct {
-	ID                   string
-	Name                 string
+	ID   string
+	Name string
+	// TODO: this is not a good way of storing resources for components
+	// that may change based on state, such as input or meter
 	idleResource         rl.Texture2D
 	idleResourceName     string
 	selectedResource     rl.Texture2D
@@ -125,6 +139,9 @@ func createComponent(c *DrawableComponent) {
 	//     componentType Enum
 	//     index         int
 	// }
+
+	// TODO: ideally we would need to set only the component
+	// and the terminals would be derived automatically
 	if strings.HasPrefix(c.Name, "Resistor") {
 		resistor := NewResistor(c.Name, nil, nil)
 		c.terminals[0].Node = resistor.Node1
@@ -152,6 +169,11 @@ func createComponent(c *DrawableComponent) {
 		source := NewSource(c.Name, nil)
 		c.terminals[0].Node = source.Node
 		c.Component = source
+		return
+	} else if strings.HasPrefix(c.Name, "Input") {
+		input := NewInput(c.Name, nil, Off)
+		c.terminals[0].Node = input.Node
+		c.Component = input
 		return
 	}
 	fmt.Println("Component type not found for ", c.Name)
@@ -252,6 +274,20 @@ func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
 	}
 }
 
+func checkChangeInputComponentState(s *DrawingState) {
+	if rl.IsKeyPressed(rl.KeyEnter) && strings.HasPrefix(s.selectedComponent.Name, "Input") {
+		inputNode := s.selectedComponent.terminals[0].Node
+		var newState NodeState
+		switch inputNode.State {
+		case Off:
+			newState = On
+		case On:
+			newState = Off
+		}
+		inputNode.State = newState
+	}
+}
+
 func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent == nil {
@@ -335,6 +371,23 @@ func getTerminalCoordinates(c DrawableComponent, t DrawableTerminal) (float32, f
 	return float32(c.X) + float32(gridComponentImageSize)*t.OffsetX, float32(c.Y) + float32(gridComponentImageSize)*t.OffsetY
 }
 
+func minAndDist(v1, v2 int32) (int32, int32) {
+	if v1 < v2 {
+		return v1, v2 - v1
+	}
+	return v2, v1 - v2
+}
+
+func drawWire(fromX, fromY, toX, toY int32, color rl.Color) {
+	if fromX == toX {
+		startY, dy := minAndDist(fromY, toY)
+		rl.DrawRectangle(fromX-gridWireWidth/2, startY-gridWireWidth/2, gridWireWidth, dy+gridWireWidth, color)
+	} else if fromY == toY {
+		startX, dx := minAndDist(fromX, toX)
+		rl.DrawRectangle(startX-gridWireWidth/2, fromY-gridWireWidth/2, dx+gridWireWidth, gridWireWidth, color)
+	}
+}
+
 func drawSchematicComponents(components []DrawableComponent) {
 	for _, component := range components {
 		if component.X == 0 && component.Y == 0 {
@@ -344,14 +397,25 @@ func drawSchematicComponents(components []DrawableComponent) {
 		rl.DrawText(component.Name, component.X, component.Y+gridComponentImageSize, gridComponentFontSize, rl.White)
 		for _, term := range component.terminals {
 			termX, termY := getTerminalCoordinates(component, *term)
+			var color rl.Color
+			switch term.Node.State {
+			case Off:
+				color = rl.White
+			case On:
+				color = rl.Yellow
+			case Undefined:
+				color = rl.White
+			default:
+				panic("unreachable state")
+			}
 			for _, conn := range term.connections {
 				connX, connY := getTerminalCoordinates(conn.component, *conn.component.terminals[conn.termIndex])
 				if termX > connX {
-					rl.DrawLine(int32(termX), int32(termY), int32(termX), int32(connY), rl.White)
-					rl.DrawLine(int32(termX), int32(connY), int32(connX), int32(connY), rl.White)
+					drawWire(int32(termX), int32(termY), int32(termX), int32(connY), color)
+					drawWire(int32(termX), int32(connY), int32(connX), int32(connY), color)
 				} else {
-					rl.DrawLine(int32(termX), int32(termY), int32(connX), int32(termY), rl.White)
-					rl.DrawLine(int32(connX), int32(termY), int32(connX), int32(connY), rl.White)
+					drawWire(int32(termX), int32(termY), int32(connX), int32(termY), color)
+					drawWire(int32(connX), int32(termY), int32(connX), int32(connY), color)
 				}
 			}
 		}
@@ -439,38 +503,45 @@ func main() {
 				"Resistor",
 				"./resources/resistor.png", "./resources/resistor-selected.png",
 				[]*DrawableTerminal{
-					{OffsetX: 0.0, OffsetY: 0.5},
-					{OffsetX: 1.0, OffsetY: 0.5},
+					{OffsetX: 0.0, OffsetY: 0.5, pointingDirection: Left},
+					{OffsetX: 1.0, OffsetY: 0.5, pointingDirection: Right},
 				},
 			),
 			NewDrawableComponent(
 				"Transistor",
 				"./resources/transistor.jpg", "",
 				[]*DrawableTerminal{
-					{OffsetX: 0.6, OffsetY: 0.05},
-					{OffsetX: 0.05, OffsetY: 0.5},
-					{OffsetX: 0.6, OffsetY: 0.95},
+					{OffsetX: 0.6, OffsetY: 0.05, pointingDirection: Up},
+					{OffsetX: 0.05, OffsetY: 0.5, pointingDirection: Left},
+					{OffsetX: 0.6, OffsetY: 0.95, pointingDirection: Down},
 				},
 			),
 			NewDrawableComponent(
 				"Source",
 				"./resources/source.png", "",
 				[]*DrawableTerminal{
-					{OffsetX: 0.5, OffsetY: 0.05},
+					{OffsetX: 0.5, OffsetY: 0.05, pointingDirection: Up},
 				},
 			),
 			NewDrawableComponent(
 				"Ground",
 				"./resources/ground.png", "",
 				[]*DrawableTerminal{
-					{OffsetX: 0.5, OffsetY: 0.05},
+					{OffsetX: 0.5, OffsetY: 0.05, pointingDirection: Up},
 				},
 			),
 			NewDrawableComponent(
 				"Multimeter",
 				"./resources/meter.jpg", "",
 				[]*DrawableTerminal{
-					{OffsetX: 0.3, OffsetY: 0.5},
+					{OffsetX: 0.3, OffsetY: 0.5, pointingDirection: Left},
+				},
+			),
+			NewDrawableComponent(
+				"Input",
+				"./resources/input.jpg", "",
+				[]*DrawableTerminal{
+					{OffsetX: 0.7, OffsetY: 0.5, pointingDirection: Right},
 				},
 			),
 		},
@@ -495,6 +566,7 @@ func main() {
 		case StateComponentSelected:
 			checkNewComponentSelected(&s, mousePos)
 			checkTerminalSelected(&s, mousePos)
+			checkChangeInputComponentState(&s)
 		case StateTerminalSelected:
 			checkConnectTerminals(&s, mousePos)
 			checkRemoveConnections(&s)

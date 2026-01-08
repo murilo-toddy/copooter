@@ -7,6 +7,14 @@ import (
 
 type ComponentType int
 
+const (
+	TypeTerminal ComponentType = iota
+	TypeResistor
+	TypeTransistor
+	TypeMeter
+	TypeInput
+)
+
 type Component interface {
 	Reset()
 	Ready() bool
