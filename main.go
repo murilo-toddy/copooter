@@ -297,16 +297,20 @@ func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
 }
 
 func checkChangeInputComponentState(s *DrawingState) {
-	if rl.IsKeyPressed(rl.KeyEnter) && strings.HasPrefix(s.selectedComponent.Name, "Input") {
-		inputNode := s.selectedComponent.terminals[0]
+	if rl.IsKeyPressed(rl.KeyEnter) {
+		terminal, ok := s.selectedComponent.Component.(*Terminal)
+		if !ok {
+			return
+		}
+
 		var newState NodeState
-		switch inputNode.State {
+		switch terminal.Node.State {
 		case Off:
 			newState = On
 		case On:
 			newState = Off
 		}
-		inputNode.State = newState
+		terminal.state = newState
 	}
 }
 
