@@ -15,26 +15,40 @@ const (
 	TypeInput
 )
 
+type RenderData struct {
+	X int32
+	Y int32
+}
+
 type Component interface {
 	Reset()
 	Ready() bool
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
 	Debug() string
+	GetRenderData() RenderData
 }
 
 type Terminal struct {
 	Node         *Node
 	state        NodeState
 	terminalType string
+	RenderData
 }
 
-func NewTerminal(name string, node *Node, state NodeState, terminalType string) *Terminal {
-	return &Terminal{
+func NewTerminal(
+	name string,
+	node *Node,
+	state NodeState,
+	terminalType string,
+) *Terminal {
+	t := &Terminal{
 		Node:         NewNode(fmt.Sprintf("%s-Node", name)).Connect(node),
 		state:        state,
 		terminalType: terminalType,
 	}
+	t.Node.Parent = t
+	return t
 }
 
 func NewSource(name string, node *Node) *Terminal {
@@ -65,14 +79,21 @@ func (t *Terminal) Debug() string {
 	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
 }
 
+func (t *Terminal) GetRenderData() RenderData {
+	return t.RenderData
+}
+
 type Meter struct {
 	Node *Node
+	RenderData
 }
 
 func NewMultimeter(name string, node *Node) *Meter {
-	return &Meter{
+	m := &Meter{
 		Node: NewNode(fmt.Sprintf("%s-Node", name)).Connect(node),
 	}
+	m.Node.Parent = m
+	return m
 }
 
 func (m *Meter) Reset() {
@@ -95,16 +116,24 @@ func (m *Meter) Debug() string {
 	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
+func (m *Meter) GetRenderData() RenderData {
+	return m.RenderData
+}
+
 type Resistor struct {
 	Node1 *Node
 	Node2 *Node
+	RenderData
 }
 
 func NewResistor(name string, node1, node2 *Node) *Resistor {
-	return &Resistor{
+	r := &Resistor{
 		Node1: NewNode(fmt.Sprintf("%s-Node1", name)).Connect(node1),
 		Node2: NewNode(fmt.Sprintf("%s-Node2", name)).Connect(node2),
 	}
+	r.Node1.Parent = r
+	r.Node2.Parent = r
+	return r
 }
 
 func (r *Resistor) Reset() {
@@ -133,18 +162,27 @@ func (r *Resistor) Debug() string {
 	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
 }
 
+func (r *Resistor) GetRenderData() RenderData {
+	return r.RenderData
+}
+
 type Transistor struct {
 	Source *Node
 	Drain  *Node
 	Gate   *Node
+	RenderData
 }
 
 func NewTransistor(name string, source, gate, drain *Node) *Transistor {
-	return &Transistor{
+	t := &Transistor{
 		Source: NewNode(fmt.Sprintf("%s-Source", name)).Connect(source),
 		Drain:  NewNode(fmt.Sprintf("%s-Drain", name)).Connect(drain),
 		Gate:   NewNode(fmt.Sprintf("%s-Gate", name)).Connect(gate),
 	}
+	t.Source.Parent = t
+	t.Drain.Parent = t
+	t.Gate.Parent = t
+	return t
 }
 
 func (t *Transistor) Reset() {
@@ -184,6 +222,10 @@ func (t *Transistor) Debug() string {
 		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
 }
 
+func (t *Transistor) GetRenderData() RenderData {
+	return t.RenderData
+}
+
 type CustomComponent struct {
 	ComponentType string
 	Subcomponents []Component
@@ -213,6 +255,10 @@ func (c *CustomComponent) Ready() bool {
 		}
 	}
 	return true
+}
+
+func (c *CustomComponent) GetRenderData() RenderData {
+	return RenderData{}
 }
 
 func (c *CustomComponent) runSubcomponents(subcomponents []Component) (notExecutedComponents []Component, err error) {

@@ -23,11 +23,15 @@ func (n NodeState) String() string {
 	}
 }
 
-// TODO: abstract rendering part
 type Node struct {
 	ID          string
 	State       NodeState
 	connections []*Node
+	Parent      Component
+
+	// Offset relative to component resource
+	OffsetX float32
+	OffsetY float32
 }
 
 // TODO: determine ID automatically

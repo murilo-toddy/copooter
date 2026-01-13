@@ -92,30 +92,6 @@ func (d *DrawingState) Log() {
 	fmt.Println(logMessage)
 }
 
-type DrawableConnection struct {
-	component DrawableComponent
-	termIndex int
-}
-
-type Direction int
-
-const (
-	Up Direction = iota
-	Right
-	Down
-	Left
-)
-
-type DrawableTerminal struct {
-	OffsetX float32
-	OffsetY float32
-	Node    *Node
-	// TODO: integrate with node flow
-	connections []*DrawableConnection
-	// Used to render wires correctly
-	pointingDirection Direction
-}
-
 type DrawableComponent struct {
 	ID   string
 	Name string
@@ -127,7 +103,7 @@ type DrawableComponent struct {
 	selectedResourceName string
 	X                    int32
 	Y                    int32
-	terminals            []*DrawableTerminal
+	terminals            []*Node
 	Component
 }
 
@@ -142,37 +118,83 @@ func createComponent(c *DrawableComponent) {
 
 	// TODO: ideally we would need to set only the component
 	// and the terminals would be derived automatically
+
+	// TODO: remove extra mumbo jumbo once DrawableComponent and Component are integrated
 	if strings.HasPrefix(c.Name, "Resistor") {
 		resistor := NewResistor(c.Name, nil, nil)
-		c.terminals[0].Node = resistor.Node1
-		c.terminals[1].Node = resistor.Node2
+
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = resistor.Node1
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		offx, offy = c.terminals[1].OffsetX, c.terminals[1].OffsetY
+		c.terminals[1] = resistor.Node2
+		c.terminals[1].OffsetX, c.terminals[1].OffsetY = offx, offy
+
+		resistor.RenderData.X = c.X
+		resistor.RenderData.Y = c.Y
 		c.Component = resistor
 		return
 	} else if strings.HasPrefix(c.Name, "Transistor") {
 		transistor := NewTransistor(c.Name, nil, nil, nil)
-		c.terminals[0].Node = transistor.Source
-		c.terminals[1].Node = transistor.Gate
-		c.terminals[2].Node = transistor.Drain
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = transistor.Source
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		offx, offy = c.terminals[1].OffsetX, c.terminals[1].OffsetY
+		c.terminals[1] = transistor.Gate
+		c.terminals[1].OffsetX, c.terminals[1].OffsetY = offx, offy
+
+		offx, offy = c.terminals[2].OffsetX, c.terminals[2].OffsetY
+		c.terminals[2] = transistor.Drain
+		c.terminals[2].OffsetX, c.terminals[2].OffsetY = offx, offy
+
+		transistor.RenderData.X = c.X
+		transistor.RenderData.Y = c.Y
 		c.Component = transistor
 		return
 	} else if strings.HasPrefix(c.Name, "Multimeter") {
 		meter := NewMultimeter(c.Name, nil)
-		c.terminals[0].Node = meter.Node
+
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = meter.Node
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		meter.RenderData.X = c.X
+		meter.RenderData.Y = c.Y
 		c.Component = meter
 		return
 	} else if strings.HasPrefix(c.Name, "Ground") {
 		ground := NewGround(c.Name, nil)
-		c.terminals[0].Node = ground.Node
+
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = ground.Node
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		ground.RenderData.X = c.X
+		ground.RenderData.Y = c.Y
 		c.Component = ground
 		return
 	} else if strings.HasPrefix(c.Name, "Source") {
 		source := NewSource(c.Name, nil)
-		c.terminals[0].Node = source.Node
+
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = source.Node
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		source.RenderData.X = c.X
+		source.RenderData.Y = c.Y
 		c.Component = source
 		return
 	} else if strings.HasPrefix(c.Name, "Input") {
 		input := NewInput(c.Name, nil, Off)
-		c.terminals[0].Node = input.Node
+
+		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
+		c.terminals[0] = input.Node
+		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
+
+		input.RenderData.X = c.X
+		input.RenderData.Y = c.Y
 		c.Component = input
 		return
 	}
@@ -190,7 +212,7 @@ func addComponent(s *DrawingState, c DrawableComponent) {
 
 	// Copy terminal pointers
 	originalTerminals := c.terminals
-	c.terminals = make([]*DrawableTerminal, len(originalTerminals))
+	c.terminals = make([]*Node, len(originalTerminals))
 	for i, term := range originalTerminals {
 		termCopy := *term
 		c.terminals[i] = &termCopy
@@ -264,7 +286,7 @@ func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent != nil && isInsideComponent(pos, *s.selectedComponent) {
 			for termIndex, term := range s.selectedComponent.terminals {
-				if isInsideTerminal(pos, *s.selectedComponent, *term) {
+				if isInsideTerminal(pos, *s.selectedComponent, term) {
 					s.selectedTerminal = &termIndex
 					s.state = StateTerminalSelected
 					return
@@ -276,7 +298,7 @@ func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
 
 func checkChangeInputComponentState(s *DrawingState) {
 	if rl.IsKeyPressed(rl.KeyEnter) && strings.HasPrefix(s.selectedComponent.Name, "Input") {
-		inputNode := s.selectedComponent.terminals[0].Node
+		inputNode := s.selectedComponent.terminals[0]
 		var newState NodeState
 		switch inputNode.State {
 		case Off:
@@ -296,11 +318,9 @@ func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
 		}
 		selectedTerminal := s.selectedComponent.terminals[*s.selectedTerminal]
 		for _, component := range s.components {
-			for termIndex, term := range component.terminals {
-				if isInsideTerminal(pos, component, *term) {
-					selectedTerminal.Node.Connect(term.Node)
-					selectedTerminal.connections = append(selectedTerminal.connections, &DrawableConnection{component, termIndex})
-					term.connections = append(term.connections, &DrawableConnection{*s.selectedComponent, *s.selectedTerminal})
+			for _, term := range component.terminals {
+				if isInsideTerminal(pos, component, term) {
+					selectedTerminal.Connect(term)
 					return
 				}
 			}
@@ -313,22 +333,7 @@ func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
 
 func checkRemoveConnections(s *DrawingState) {
 	if rl.IsKeyPressed(rl.KeyD) {
-		term := s.selectedComponent.terminals[*s.selectedTerminal]
-		term.Node = term.Node.DisconnectAll()
-		for _, conn := range term.connections {
-			// For every connection, loop through their connections
-			// TODO: use a more suitable data structure
-			for _, connTerm := range conn.component.terminals {
-				for i, connTermConnection := range connTerm.connections {
-					if connTermConnection.component.ID == s.selectedComponent.ID && connTermConnection.termIndex == *s.selectedTerminal {
-						connTerm.connections[i] = connTerm.connections[len(connTerm.connections)-1]
-						connTerm.connections = connTerm.connections[:len(connTerm.connections)-1]
-					}
-				}
-
-			}
-		}
-		term.connections = make([]*DrawableConnection, 0)
+		s.selectedComponent.terminals[*s.selectedTerminal].DisconnectAll()
 	}
 }
 
@@ -367,8 +372,9 @@ func drawGridLines() {
 	}
 }
 
-func getTerminalCoordinates(c DrawableComponent, t DrawableTerminal) (float32, float32) {
-	return float32(c.X) + float32(gridComponentImageSize)*t.OffsetX, float32(c.Y) + float32(gridComponentImageSize)*t.OffsetY
+func getTerminalCoordinates(n *Node) (float32, float32) {
+	r := n.Parent.GetRenderData()
+	return float32(r.X) + float32(gridComponentImageSize)*n.OffsetX, float32(r.Y) + float32(gridComponentImageSize)*n.OffsetY
 }
 
 func minAndDist(v1, v2 int32) (int32, int32) {
@@ -396,9 +402,9 @@ func drawSchematicComponents(components []DrawableComponent) {
 		rl.DrawTexture(component.idleResource, component.X, component.Y, rl.White)
 		rl.DrawText(component.Name, component.X, component.Y+gridComponentImageSize, gridComponentFontSize, rl.White)
 		for _, term := range component.terminals {
-			termX, termY := getTerminalCoordinates(component, *term)
+			termX, termY := getTerminalCoordinates(term)
 			var color rl.Color
-			switch term.Node.State {
+			switch term.State {
 			case Off:
 				color = rl.White
 			case On:
@@ -409,7 +415,7 @@ func drawSchematicComponents(components []DrawableComponent) {
 				panic("unreachable state")
 			}
 			for _, conn := range term.connections {
-				connX, connY := getTerminalCoordinates(conn.component, *conn.component.terminals[conn.termIndex])
+				connX, connY := getTerminalCoordinates(conn)
 				if termX > connX {
 					drawWire(int32(termX), int32(termY), int32(termX), int32(connY), color)
 					drawWire(int32(termX), int32(connY), int32(connX), int32(connY), color)
@@ -431,8 +437,8 @@ func isInsideComponent(pos rl.Vector2, c DrawableComponent) bool {
 	return isInsideSquare(pos, c.X, c.Y, gridComponentImageSize, gridComponentImageSize)
 }
 
-func isInsideTerminal(pos rl.Vector2, c DrawableComponent, term DrawableTerminal) bool {
-	termCenterX, termCenterY := getTerminalCoordinates(c, term)
+func isInsideTerminal(pos rl.Vector2, c DrawableComponent, term *Node) bool {
+	termCenterX, termCenterY := getTerminalCoordinates(term)
 	r := gridComponentTerminalRadius
 	return pos.X >= termCenterX-r && pos.X <= termCenterX+r &&
 		pos.Y >= termCenterY-r && pos.Y <= termCenterY+r
@@ -453,10 +459,10 @@ func drawComponentOutline(c DrawableComponent, color rl.Color) {
 	rl.DrawRectangleLines(c.X, c.Y, gridComponentImageSize, gridComponentImageSize, color)
 }
 
-func drawTerminal(c DrawableComponent, t DrawableTerminal, color rl.Color) {
+func drawTerminal(c DrawableComponent, n *Node, color rl.Color) {
 	rl.DrawCircle(
-		c.X+int32(float32(gridComponentImageSize)*t.OffsetX),
-		c.Y+int32(float32(gridComponentImageSize)*t.OffsetY),
+		c.X+int32(float32(gridComponentImageSize)*n.OffsetX),
+		c.Y+int32(float32(gridComponentImageSize)*n.OffsetY),
 		gridComponentTerminalRadius,
 		color,
 	)
@@ -477,11 +483,10 @@ func drawPlayButton() {
 
 func setComponentID(s *DrawingState, c *DrawableComponent) {
 	c.ID = fmt.Sprintf("%d", s.nextComponentID)
-	fmt.Println("adding component ", c.Name, " with ID ", c.ID)
 	s.nextComponentID += 1
 }
 
-func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, terminals []*DrawableTerminal) DrawableComponent {
+func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, terminals []*Node) DrawableComponent {
 	return DrawableComponent{
 		Name:                 name,
 		idleResourceName:     idleResourceName,
@@ -502,46 +507,46 @@ func main() {
 			NewDrawableComponent(
 				"Resistor",
 				"./resources/resistor.png", "./resources/resistor-selected.png",
-				[]*DrawableTerminal{
-					{OffsetX: 0.0, OffsetY: 0.5, pointingDirection: Left},
-					{OffsetX: 1.0, OffsetY: 0.5, pointingDirection: Right},
+				[]*Node{
+					{OffsetX: 0.0, OffsetY: 0.5},
+					{OffsetX: 1.0, OffsetY: 0.5},
 				},
 			),
 			NewDrawableComponent(
 				"Transistor",
 				"./resources/transistor.jpg", "",
-				[]*DrawableTerminal{
-					{OffsetX: 0.6, OffsetY: 0.05, pointingDirection: Up},
-					{OffsetX: 0.05, OffsetY: 0.5, pointingDirection: Left},
-					{OffsetX: 0.6, OffsetY: 0.95, pointingDirection: Down},
+				[]*Node{
+					{OffsetX: 0.6, OffsetY: 0.05},
+					{OffsetX: 0.05, OffsetY: 0.5},
+					{OffsetX: 0.6, OffsetY: 0.95},
 				},
 			),
 			NewDrawableComponent(
 				"Source",
 				"./resources/source.png", "",
-				[]*DrawableTerminal{
-					{OffsetX: 0.5, OffsetY: 0.05, pointingDirection: Up},
+				[]*Node{
+					{OffsetX: 0.5, OffsetY: 0.05},
 				},
 			),
 			NewDrawableComponent(
 				"Ground",
 				"./resources/ground.png", "",
-				[]*DrawableTerminal{
-					{OffsetX: 0.5, OffsetY: 0.05, pointingDirection: Up},
+				[]*Node{
+					{OffsetX: 0.5, OffsetY: 0.05},
 				},
 			),
 			NewDrawableComponent(
 				"Multimeter",
 				"./resources/meter.jpg", "",
-				[]*DrawableTerminal{
-					{OffsetX: 0.3, OffsetY: 0.5, pointingDirection: Left},
+				[]*Node{
+					{OffsetX: 0.3, OffsetY: 0.5},
 				},
 			),
 			NewDrawableComponent(
 				"Input",
 				"./resources/input.jpg", "",
-				[]*DrawableTerminal{
-					{OffsetX: 0.7, OffsetY: 0.5, pointingDirection: Right},
+				[]*Node{
+					{OffsetX: 0.7, OffsetY: 0.5},
 				},
 			),
 		},
@@ -599,7 +604,7 @@ func main() {
 				rl.DrawRectangleLines(s.selectedComponent.X, s.selectedComponent.Y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
 			}
 			for _, term := range s.selectedComponent.terminals {
-				drawTerminal(*s.selectedComponent, *term, rl.Red)
+				drawTerminal(*s.selectedComponent, term, rl.Red)
 			}
 		case StateTerminalSelected:
 			for _, component := range s.components {
@@ -610,7 +615,7 @@ func main() {
 					} else {
 						color = rl.Red
 					}
-					drawTerminal(component, *term, color)
+					drawTerminal(component, term, color)
 				}
 			}
 		case StateSimulating:
