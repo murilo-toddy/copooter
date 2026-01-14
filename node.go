@@ -58,7 +58,7 @@ func (n *Node) Change(newState NodeState) error {
 }
 
 func (n *Node) Debug() string {
-	return fmt.Sprintf("%s=<state: %s>", n.ID, n.State)
+	return fmt.Sprintf("%s=<state: %s> (offX: %f, offY: %f)", n.ID, n.State, n.OffsetX, n.OffsetY)
 }
 
 func (n *Node) Connect(n1 *Node) *Node {

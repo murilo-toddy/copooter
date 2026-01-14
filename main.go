@@ -45,7 +45,7 @@ const (
 	StateIdle State = iota
 	StateDragging
 	StateComponentSelected
-	StateTerminalSelected
+	StateNodeSelected
 	StateSimulating
 )
 
@@ -57,7 +57,7 @@ type DrawingState struct {
 
 	draggingComponent *DrawableComponent
 	selectedComponent *DrawableComponent
-	selectedTerminal  *int
+	selectedNode      *int
 }
 
 func (d *DrawingState) Log() {
@@ -71,8 +71,8 @@ func (d *DrawingState) Log() {
 		state = "dragging"
 	case StateComponentSelected:
 		state = "component-selected"
-	case StateTerminalSelected:
-		state = "terminal-selected"
+	case StateNodeSelected:
+		state = "node-selected"
 	}
 	logMessage += fmt.Sprintf("Current state: %s", state)
 
@@ -82,11 +82,11 @@ func (d *DrawingState) Log() {
 	if d.selectedComponent != nil {
 		logMessage += fmt.Sprintf(" | selected component %s", d.selectedComponent.Name)
 	}
-	if d.selectedTerminal != nil {
+	if d.selectedNode != nil {
 		if d.selectedComponent == nil {
-			logMessage += fmt.Sprintf(" | selected terminal %d but component nil", *d.selectedTerminal)
+			logMessage += fmt.Sprintf(" | selected node %d but component nil", *d.selectedNode)
 		} else {
-			logMessage += fmt.Sprintf(" | selected terminal %d of %s", *d.selectedTerminal, d.selectedComponent.Name)
+			logMessage += fmt.Sprintf(" | selected node %d of %s", *d.selectedNode, d.selectedComponent.Name)
 		}
 	}
 	fmt.Println(logMessage)
@@ -103,7 +103,6 @@ type DrawableComponent struct {
 	selectedResourceName string
 	X                    int32
 	Y                    int32
-	terminals            []*Node
 	Component
 }
 
@@ -122,77 +121,37 @@ func createComponent(c *DrawableComponent) {
 	// TODO: remove extra mumbo jumbo once DrawableComponent and Component are integrated
 	if strings.HasPrefix(c.Name, "Resistor") {
 		resistor := NewResistor(c.Name, nil, nil)
-
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = resistor.Node1
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
-		offx, offy = c.terminals[1].OffsetX, c.terminals[1].OffsetY
-		c.terminals[1] = resistor.Node2
-		c.terminals[1].OffsetX, c.terminals[1].OffsetY = offx, offy
-
 		resistor.RenderData.X = c.X
 		resistor.RenderData.Y = c.Y
+
 		c.Component = resistor
 		return
 	} else if strings.HasPrefix(c.Name, "Transistor") {
 		transistor := NewTransistor(c.Name, nil, nil, nil)
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = transistor.Source
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
-		offx, offy = c.terminals[1].OffsetX, c.terminals[1].OffsetY
-		c.terminals[1] = transistor.Gate
-		c.terminals[1].OffsetX, c.terminals[1].OffsetY = offx, offy
-
-		offx, offy = c.terminals[2].OffsetX, c.terminals[2].OffsetY
-		c.terminals[2] = transistor.Drain
-		c.terminals[2].OffsetX, c.terminals[2].OffsetY = offx, offy
-
 		transistor.RenderData.X = c.X
 		transistor.RenderData.Y = c.Y
 		c.Component = transistor
 		return
 	} else if strings.HasPrefix(c.Name, "Multimeter") {
 		meter := NewMultimeter(c.Name, nil)
-
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = meter.Node
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
 		meter.RenderData.X = c.X
 		meter.RenderData.Y = c.Y
 		c.Component = meter
 		return
 	} else if strings.HasPrefix(c.Name, "Ground") {
 		ground := NewGround(c.Name, nil)
-
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = ground.Node
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
 		ground.RenderData.X = c.X
 		ground.RenderData.Y = c.Y
 		c.Component = ground
 		return
 	} else if strings.HasPrefix(c.Name, "Source") {
 		source := NewSource(c.Name, nil)
-
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = source.Node
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
 		source.RenderData.X = c.X
 		source.RenderData.Y = c.Y
 		c.Component = source
 		return
 	} else if strings.HasPrefix(c.Name, "Input") {
 		input := NewInput(c.Name, nil, Off)
-
-		offx, offy := c.terminals[0].OffsetX, c.terminals[0].OffsetY
-		c.terminals[0] = input.Node
-		c.terminals[0].OffsetX, c.terminals[0].OffsetY = offx, offy
-
 		input.RenderData.X = c.X
 		input.RenderData.Y = c.Y
 		c.Component = input
@@ -208,18 +167,18 @@ func addComponent(s *DrawingState, c DrawableComponent) {
 			n++
 		}
 	}
+
 	c.Name = fmt.Sprintf("%s %d", c.Name, n)
 
-	// Copy terminal pointers
-	originalTerminals := c.terminals
-	c.terminals = make([]*Node, len(originalTerminals))
-	for i, term := range originalTerminals {
-		termCopy := *term
-		c.terminals[i] = &termCopy
-	}
+	newComponent := c.Component.Clone()
 
-	// Ensure new nodes are created once component is dropped
-	createComponent(&c)
+	// set x,y coordinates of new component
+	newR := newComponent.GetRenderData()
+	newR.X = c.X
+	newR.Y = c.Y
+
+	c.Component = newComponent
+
 	setComponentID(s, &c)
 	s.components = append(s.components, c)
 }
@@ -277,18 +236,18 @@ func checkNewComponentSelected(s *DrawingState, pos rl.Vector2) {
 			}
 		}
 		s.selectedComponent = nil
-		s.selectedTerminal = nil
+		s.selectedNode = nil
 		s.state = StateIdle
 	}
 }
 
-func checkTerminalSelected(s *DrawingState, pos rl.Vector2) {
+func checkNodeSelected(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent != nil && isInsideComponent(pos, *s.selectedComponent) {
-			for termIndex, term := range s.selectedComponent.terminals {
-				if isInsideTerminal(pos, *s.selectedComponent, term) {
-					s.selectedTerminal = &termIndex
-					s.state = StateTerminalSelected
+			for nodeIndex, node := range s.selectedComponent.Nodes() {
+				if isInsideNode(pos, *s.selectedComponent, node) {
+					s.selectedNode = &nodeIndex
+					s.state = StateNodeSelected
 					return
 				}
 			}
@@ -314,30 +273,30 @@ func checkChangeInputComponentState(s *DrawingState) {
 	}
 }
 
-func checkConnectTerminals(s *DrawingState, pos rl.Vector2) {
+func checkConnectNodes(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent == nil {
 			fmt.Println("Attempting to connect terminal but selected component is nil")
 			return
 		}
-		selectedTerminal := s.selectedComponent.terminals[*s.selectedTerminal]
+		selectedTerminal := s.selectedComponent.Nodes()[*s.selectedNode]
 		for _, component := range s.components {
-			for _, term := range component.terminals {
-				if isInsideTerminal(pos, component, term) {
+			for _, term := range component.Nodes() {
+				if isInsideNode(pos, component, term) {
 					selectedTerminal.Connect(term)
 					return
 				}
 			}
 		}
 		s.selectedComponent = nil
-		s.selectedTerminal = nil
+		s.selectedNode = nil
 		s.state = StateIdle
 	}
 }
 
 func checkRemoveConnections(s *DrawingState) {
 	if rl.IsKeyPressed(rl.KeyD) {
-		s.selectedComponent.terminals[*s.selectedTerminal].DisconnectAll()
+		s.selectedComponent.Nodes()[*s.selectedNode].DisconnectAll()
 	}
 }
 
@@ -405,7 +364,7 @@ func drawSchematicComponents(components []DrawableComponent) {
 		}
 		rl.DrawTexture(component.idleResource, component.X, component.Y, rl.White)
 		rl.DrawText(component.Name, component.X, component.Y+gridComponentImageSize, gridComponentFontSize, rl.White)
-		for _, term := range component.terminals {
+		for _, term := range component.Nodes() {
 			termX, termY := getTerminalCoordinates(term)
 			var color rl.Color
 			switch term.State {
@@ -441,7 +400,7 @@ func isInsideComponent(pos rl.Vector2, c DrawableComponent) bool {
 	return isInsideSquare(pos, c.X, c.Y, gridComponentImageSize, gridComponentImageSize)
 }
 
-func isInsideTerminal(pos rl.Vector2, c DrawableComponent, term *Node) bool {
+func isInsideNode(pos rl.Vector2, c DrawableComponent, term *Node) bool {
 	termCenterX, termCenterY := getTerminalCoordinates(term)
 	r := gridComponentTerminalRadius
 	return pos.X >= termCenterX-r && pos.X <= termCenterX+r &&
@@ -490,14 +449,14 @@ func setComponentID(s *DrawingState, c *DrawableComponent) {
 	s.nextComponentID += 1
 }
 
-func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, terminals []*Node) DrawableComponent {
+func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, component Component) DrawableComponent {
 	return DrawableComponent{
 		Name:                 name,
 		idleResourceName:     idleResourceName,
 		idleResource:         loadTextureWithSize(idleResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
 		selectedResource:     loadTextureWithSize(selectedResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
 		selectedResourceName: selectedResourceName,
-		terminals:            terminals,
+		Component:            component,
 	}
 }
 
@@ -511,47 +470,36 @@ func main() {
 			NewDrawableComponent(
 				"Resistor",
 				"./resources/resistor.png", "./resources/resistor-selected.png",
-				[]*Node{
-					{OffsetX: 0.0, OffsetY: 0.5},
-					{OffsetX: 1.0, OffsetY: 0.5},
-				},
+				NewResistorFromNodes(&Node{OffsetX: 0.0, OffsetY: 0.5}, &Node{OffsetX: 1.0, OffsetY: 0.5}),
 			),
 			NewDrawableComponent(
 				"Transistor",
 				"./resources/transistor.jpg", "",
-				[]*Node{
-					{OffsetX: 0.6, OffsetY: 0.05},
-					{OffsetX: 0.05, OffsetY: 0.5},
-					{OffsetX: 0.6, OffsetY: 0.95},
-				},
+				NewTransistorFromNodes(
+					&Node{OffsetX: 0.6, OffsetY: 0.05},
+					&Node{OffsetX: 0.05, OffsetY: 0.5},
+					&Node{OffsetX: 0.6, OffsetY: 0.95},
+				),
 			),
 			NewDrawableComponent(
 				"Source",
 				"./resources/source.png", "",
-				[]*Node{
-					{OffsetX: 0.5, OffsetY: 0.05},
-				},
+				NewSourceFromNodes(&Node{OffsetX: 0.5, OffsetY: 0.05}),
 			),
 			NewDrawableComponent(
 				"Ground",
 				"./resources/ground.png", "",
-				[]*Node{
-					{OffsetX: 0.5, OffsetY: 0.05},
-				},
+				NewGroundFromNodes(&Node{OffsetX: 0.5, OffsetY: 0.05}),
 			),
 			NewDrawableComponent(
 				"Multimeter",
 				"./resources/meter.jpg", "",
-				[]*Node{
-					{OffsetX: 0.3, OffsetY: 0.5},
-				},
+				NewMultimeterFromNodes(&Node{OffsetX: 0.3, OffsetY: 0.5}),
 			),
 			NewDrawableComponent(
 				"Input",
 				"./resources/input.jpg", "",
-				[]*Node{
-					{OffsetX: 0.7, OffsetY: 0.5},
-				},
+				NewInputFromNodes(&Node{OffsetX: 0.7, OffsetY: 0.5}, Off),
 			),
 		},
 	}
@@ -574,10 +522,10 @@ func main() {
 			checkComponentDropped(&s, mousePos)
 		case StateComponentSelected:
 			checkNewComponentSelected(&s, mousePos)
-			checkTerminalSelected(&s, mousePos)
+			checkNodeSelected(&s, mousePos)
 			checkChangeInputComponentState(&s)
-		case StateTerminalSelected:
-			checkConnectTerminals(&s, mousePos)
+		case StateNodeSelected:
+			checkConnectNodes(&s, mousePos)
 			checkRemoveConnections(&s)
 			checkNewComponentSelected(&s, mousePos)
 		}
@@ -607,14 +555,14 @@ func main() {
 				drawComponentOutline(*s.selectedComponent, rl.Yellow)
 				rl.DrawRectangleLines(s.selectedComponent.X, s.selectedComponent.Y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
 			}
-			for _, term := range s.selectedComponent.terminals {
+			for _, term := range s.selectedComponent.Nodes() {
 				drawTerminal(*s.selectedComponent, term, rl.Red)
 			}
-		case StateTerminalSelected:
+		case StateNodeSelected:
 			for _, component := range s.components {
-				for termIndex, term := range component.terminals {
+				for termIndex, term := range component.Nodes() {
 					var color rl.Color
-					if component.ID == s.selectedComponent.ID && termIndex == *s.selectedTerminal {
+					if component.ID == s.selectedComponent.ID && termIndex == *s.selectedNode {
 						color = rl.Blue
 					} else {
 						color = rl.Red

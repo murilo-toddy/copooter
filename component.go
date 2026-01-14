@@ -1,8 +1,11 @@
+// TODO: share NewX and NewXFromNodes
 package main
 
 import (
 	"fmt"
 	"strings"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
 type ComponentType int
@@ -16,19 +19,39 @@ const (
 )
 
 type RenderData struct {
-	X int32
-	Y int32
+	ID   string
+	Name string
+	// TODO: this is not a good way of storing resources for components
+	// that may change based on state, such as input or meter
+	idleResource         rl.Texture2D
+	idleResourceName     string
+	selectedResource     rl.Texture2D
+	selectedResourceName string
+	X                    int32
+	Y                    int32
+	Component
 }
 
 type Component interface {
+	// resets component to default state
 	Reset()
+	// checks if a component is ready to be executed
 	Ready() bool
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
+
+	GetRenderData() *RenderData
+
+	// TODO: make components own a []*Node list to avoid multiple instantiations per render cycle
+	Nodes() []*Node
+
+	// TODO: make clone empty node connections
+	Clone() Component
+
 	Debug() string
-	GetRenderData() RenderData
 }
 
+// TODO: make terminalType an enum
 type Terminal struct {
 	Node         *Node
 	state        NodeState
@@ -51,16 +74,38 @@ func NewTerminal(
 	return t
 }
 
+func NewTerminalFromNodes(
+	node *Node,
+	state NodeState,
+	terminalType string,
+) *Terminal {
+	t := &Terminal{Node: node, state: state, terminalType: terminalType}
+	t.Node.Parent = t
+	return t
+}
+
 func NewSource(name string, node *Node) *Terminal {
 	return NewTerminal(name, node, On, "Source")
+}
+
+func NewSourceFromNodes(node *Node) *Terminal {
+	return NewTerminalFromNodes(node, On, "Source")
 }
 
 func NewGround(name string, node *Node) *Terminal {
 	return NewTerminal(name, node, Off, "Ground")
 }
 
+func NewGroundFromNodes(node *Node) *Terminal {
+	return NewTerminalFromNodes(node, Off, "Ground")
+}
+
 func NewInput(name string, node *Node, state NodeState) *Terminal {
 	return NewTerminal(name, node, state, "Input")
+}
+
+func NewInputFromNodes(node *Node, state NodeState) *Terminal {
+	return NewTerminalFromNodes(node, state, "Input")
 }
 
 func (t *Terminal) Reset() {
@@ -75,12 +120,26 @@ func (t *Terminal) Act() error {
 	return t.Node.Change(t.state)
 }
 
-func (t *Terminal) Debug() string {
-	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
+func (t *Terminal) GetRenderData() *RenderData {
+	return &t.RenderData
 }
 
-func (t *Terminal) GetRenderData() RenderData {
-	return t.RenderData
+func (t *Terminal) Nodes() []*Node {
+	return []*Node{t.Node}
+}
+
+func (t Terminal) Clone() Component {
+	nodeCopy := *t.Node
+
+	newTerminal := t
+	newTerminal.Node = &nodeCopy
+	newTerminal.Node.Parent = &newTerminal
+
+	return &newTerminal
+}
+
+func (t *Terminal) Debug() string {
+	return fmt.Sprintf("%s<node: %s>", t.terminalType, t.Node.Debug())
 }
 
 type Meter struct {
@@ -92,6 +151,12 @@ func NewMultimeter(name string, node *Node) *Meter {
 	m := &Meter{
 		Node: NewNode(fmt.Sprintf("%s-Node", name)).Connect(node),
 	}
+	m.Node.Parent = m
+	return m
+}
+
+func NewMultimeterFromNodes(node *Node) *Meter {
+	m := &Meter{Node: node}
 	m.Node.Parent = m
 	return m
 }
@@ -112,12 +177,25 @@ func (m *Meter) Act() error {
 	return nil
 }
 
+func (m *Meter) Nodes() []*Node {
+	return []*Node{m.Node}
+}
+
+func (m Meter) Clone() Component {
+	nodeCopy := *m.Node
+
+	newMeter := m
+	newMeter.Node = &nodeCopy
+	newMeter.Node.Parent = &newMeter
+	return &newMeter
+}
+
 func (m *Meter) Debug() string {
 	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
-func (m *Meter) GetRenderData() RenderData {
-	return m.RenderData
+func (m *Meter) GetRenderData() *RenderData {
+	return &m.RenderData
 }
 
 type Resistor struct {
@@ -130,6 +208,16 @@ func NewResistor(name string, node1, node2 *Node) *Resistor {
 	r := &Resistor{
 		Node1: NewNode(fmt.Sprintf("%s-Node1", name)).Connect(node1),
 		Node2: NewNode(fmt.Sprintf("%s-Node2", name)).Connect(node2),
+	}
+	r.Node1.Parent = r
+	r.Node2.Parent = r
+	return r
+}
+
+func NewResistorFromNodes(node1, node2 *Node) *Resistor {
+	r := &Resistor{
+		Node1: node1,
+		Node2: node2,
 	}
 	r.Node1.Parent = r
 	r.Node2.Parent = r
@@ -158,12 +246,28 @@ func (r *Resistor) Act() error {
 	return nil
 }
 
-func (r *Resistor) Debug() string {
-	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
+func (r *Resistor) Nodes() []*Node {
+	return []*Node{r.Node1, r.Node2}
 }
 
-func (r *Resistor) GetRenderData() RenderData {
-	return r.RenderData
+func (r Resistor) Clone() Component {
+	node1Copy := *r.Node1
+	node2Copy := *r.Node2
+
+	newResistor := r
+	newResistor.Node1 = &node1Copy
+	newResistor.Node2 = &node2Copy
+	newResistor.Node1.Parent = &newResistor
+	newResistor.Node2.Parent = &newResistor
+	return &newResistor
+}
+
+func (r *Resistor) GetRenderData() *RenderData {
+	return &r.RenderData
+}
+
+func (r *Resistor) Debug() string {
+	return fmt.Sprintf("Resistor<node1: %s, node2: %s>", r.Node1.Debug(), r.Node2.Debug())
 }
 
 type Transistor struct {
@@ -179,6 +283,14 @@ func NewTransistor(name string, source, gate, drain *Node) *Transistor {
 		Drain:  NewNode(fmt.Sprintf("%s-Drain", name)).Connect(drain),
 		Gate:   NewNode(fmt.Sprintf("%s-Gate", name)).Connect(gate),
 	}
+	t.Source.Parent = t
+	t.Drain.Parent = t
+	t.Gate.Parent = t
+	return t
+}
+
+func NewTransistorFromNodes(source, gate, drain *Node) *Transistor {
+	t := &Transistor{Source: source, Drain: drain, Gate: gate}
 	t.Source.Parent = t
 	t.Drain.Parent = t
 	t.Gate.Parent = t
@@ -217,13 +329,34 @@ func (t *Transistor) Act() error {
 	return nil
 }
 
-func (t *Transistor) Debug() string {
-	return fmt.Sprintf("Transistor<source=%s, gate=%s, drain=%s>",
-		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
+func (t *Transistor) Nodes() []*Node {
+	return []*Node{t.Source, t.Gate, t.Drain}
 }
 
-func (t *Transistor) GetRenderData() RenderData {
-	return t.RenderData
+func (t Transistor) Clone() Component {
+	sourceCopy := *t.Source
+	gateCopy := *t.Gate
+	drainCopy := *t.Drain
+
+	newTransistor := t
+	newTransistor.Source = &sourceCopy
+	newTransistor.Gate = &gateCopy
+	newTransistor.Drain = &drainCopy
+
+	newTransistor.Source.Parent = &newTransistor
+	newTransistor.Gate.Parent = &newTransistor
+	newTransistor.Drain.Parent = &newTransistor
+
+	return &newTransistor
+}
+
+func (t *Transistor) GetRenderData() *RenderData {
+	return &t.RenderData
+}
+
+func (t *Transistor) Debug() string {
+	return fmt.Sprintf("Transistor<source=%s, gate=%s, drain=%s> (x: %d, y: %d)",
+		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug(), t.RenderData.X, t.RenderData.Y)
 }
 
 type CustomComponent struct {
@@ -257,8 +390,18 @@ func (c *CustomComponent) Ready() bool {
 	return true
 }
 
-func (c *CustomComponent) GetRenderData() RenderData {
-	return RenderData{}
+func (c *CustomComponent) Nodes() []*Node {
+	// TODO
+	return []*Node{}
+}
+
+func (c *CustomComponent) GetRenderData() *RenderData {
+	return &RenderData{}
+}
+
+func (c *CustomComponent) Clone() Component {
+	// TODO
+	return c
 }
 
 func (c *CustomComponent) runSubcomponents(subcomponents []Component) (notExecutedComponents []Component, err error) {
