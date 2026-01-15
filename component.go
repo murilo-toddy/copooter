@@ -1,3 +1,5 @@
+// TODO: extract common fields to a separate struct and act on it
+// to remove code duplication
 // TODO: share NewX and NewXFromNodes
 package main
 
@@ -18,18 +20,20 @@ const (
 	TypeInput
 )
 
-type RenderData struct {
-	ID   string
+type Position struct {
+	X int32
+	Y int32
+}
+
+func (p Position) Unpack() (int32, int32) {
+	return p.X, p.Y
+}
+
+// Structure shared between all components
+type ComponentID struct {
 	Name string
-	// TODO: this is not a good way of storing resources for components
-	// that may change based on state, such as input or meter
-	idleResource         rl.Texture2D
-	idleResourceName     string
-	selectedResource     rl.Texture2D
-	selectedResourceName string
-	X                    int32
-	Y                    int32
-	Component
+	ID   string
+	Position
 }
 
 type Component interface {
@@ -40,23 +44,30 @@ type Component interface {
 	// propagates component input to its outputs, should only be called if c.Ready() returns true
 	Act() error
 
-	GetRenderData() *RenderData
+	Render(DrawingState)
+
+	GetID() ComponentID
+	// Equivalent of GetID().Position.Unpack()
+	GetPosition() (int32, int32)
 
 	// TODO: make components own a []*Node list to avoid multiple instantiations per render cycle
 	Nodes() []*Node
 
 	// TODO: make clone empty node connections
-	Clone() Component
+	Clone(overrides ComponentID) Component
 
 	Debug() string
 }
 
 // TODO: make terminalType an enum
 type Terminal struct {
+	ComponentID
 	Node         *Node
 	state        NodeState
 	terminalType string
-	RenderData
+
+	// Rendering data
+	resource rl.Texture2D
 }
 
 func NewTerminal(
@@ -74,13 +85,18 @@ func NewTerminal(
 	return t
 }
 
-func NewTerminalFromNodes(
+func NewDrawableTerminal(
+	name string,
 	node *Node,
 	state NodeState,
 	terminalType string,
+	resourceName string,
 ) *Terminal {
 	t := &Terminal{Node: node, state: state, terminalType: terminalType}
 	t.Node.Parent = t
+
+	t.ComponentID.Name = name
+	t.resource = loadGridTexture(resourceName)
 	return t
 }
 
@@ -88,24 +104,24 @@ func NewSource(name string, node *Node) *Terminal {
 	return NewTerminal(name, node, On, "Source")
 }
 
-func NewSourceFromNodes(node *Node) *Terminal {
-	return NewTerminalFromNodes(node, On, "Source")
+func NewDrawableSource(name string, node *Node, resourceName string) *Terminal {
+	return NewDrawableTerminal(name, node, On, "Source", resourceName)
 }
 
 func NewGround(name string, node *Node) *Terminal {
 	return NewTerminal(name, node, Off, "Ground")
 }
 
-func NewGroundFromNodes(node *Node) *Terminal {
-	return NewTerminalFromNodes(node, Off, "Ground")
+func NewDrawableGround(name string, node *Node, resourceName string) *Terminal {
+	return NewDrawableTerminal(name, node, Off, "Ground", resourceName)
 }
 
 func NewInput(name string, node *Node, state NodeState) *Terminal {
 	return NewTerminal(name, node, state, "Input")
 }
 
-func NewInputFromNodes(node *Node, state NodeState) *Terminal {
-	return NewTerminalFromNodes(node, state, "Input")
+func NewDrawableInput(name string, node *Node, state NodeState, resourceName string) *Terminal {
+	return NewDrawableTerminal(name, node, state, "Input", resourceName)
 }
 
 func (t *Terminal) Reset() {
@@ -120,18 +136,36 @@ func (t *Terminal) Act() error {
 	return t.Node.Change(t.state)
 }
 
-func (t *Terminal) GetRenderData() *RenderData {
-	return &t.RenderData
+func (t *Terminal) Render(s DrawingState) {
+	x, y := t.Position.Unpack()
+	rl.DrawTexture(t.resource, x, y, rl.White)
+	rl.DrawText(t.Name, x, y+gridComponentImageSize, gridComponentFontSize, rl.White)
+
+	if s.state == StateComponentSelected && *s.selectedComponent == t {
+		drawComponentOutline(*s.selectedComponent, rl.Yellow)
+		x, y := (*s.selectedComponent).GetPosition()
+		rl.DrawRectangleLines(x, y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
+	}
+}
+
+func (t *Terminal) GetID() ComponentID {
+	return t.ComponentID
+}
+
+func (t *Terminal) GetPosition() (int32, int32) {
+	return t.Position.X, t.Position.Y
 }
 
 func (t *Terminal) Nodes() []*Node {
 	return []*Node{t.Node}
 }
 
-func (t Terminal) Clone() Component {
+func (t Terminal) Clone(newID ComponentID) Component {
 	nodeCopy := *t.Node
 
 	newTerminal := t
+	newTerminal.ComponentID = newID
+
 	newTerminal.Node = &nodeCopy
 	newTerminal.Node.Parent = &newTerminal
 
@@ -143,8 +177,11 @@ func (t *Terminal) Debug() string {
 }
 
 type Meter struct {
+	ComponentID
 	Node *Node
-	RenderData
+
+	// Rendering data
+	resource rl.Texture2D
 }
 
 func NewMultimeter(name string, node *Node) *Meter {
@@ -155,9 +192,13 @@ func NewMultimeter(name string, node *Node) *Meter {
 	return m
 }
 
-func NewMultimeterFromNodes(node *Node) *Meter {
+func NewDrawableMultimeter(name string, node *Node, resourceName string) *Meter {
 	m := &Meter{Node: node}
 	m.Node.Parent = m
+
+	m.ComponentID.Name = name
+	m.resource = loadGridTexture(resourceName)
+
 	return m
 }
 
@@ -181,27 +222,50 @@ func (m *Meter) Nodes() []*Node {
 	return []*Node{m.Node}
 }
 
-func (m Meter) Clone() Component {
+func (m Meter) Clone(newID ComponentID) Component {
 	nodeCopy := *m.Node
 
 	newMeter := m
+	newMeter.ComponentID = newID
+
 	newMeter.Node = &nodeCopy
 	newMeter.Node.Parent = &newMeter
 	return &newMeter
+}
+
+func (m *Meter) Render(s DrawingState) {
+	x, y := m.GetPosition()
+	rl.DrawTexture(m.resource, x, y, rl.White)
+	rl.DrawText(m.Name, x, y+gridComponentImageSize, gridComponentFontSize, rl.White)
+
+	if s.state == StateComponentSelected && *s.selectedComponent == m {
+		drawComponentOutline(*s.selectedComponent, rl.Yellow)
+		x, y := (*s.selectedComponent).GetPosition()
+		rl.DrawRectangleLines(x, y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
+
+	}
+}
+
+func (m *Meter) GetID() ComponentID {
+	return m.ComponentID
+}
+
+func (m *Meter) GetPosition() (int32, int32) {
+	return m.Position.Unpack()
 }
 
 func (m *Meter) Debug() string {
 	return fmt.Sprintf("Multimeter<node=%s, state=%s>", m.Node.ID, m.Node.State)
 }
 
-func (m *Meter) GetRenderData() *RenderData {
-	return &m.RenderData
-}
-
 type Resistor struct {
+	ComponentID
 	Node1 *Node
 	Node2 *Node
-	RenderData
+
+	// Rendering data
+	idleResource     rl.Texture2D
+	selectedResource rl.Texture2D
 }
 
 func NewResistor(name string, node1, node2 *Node) *Resistor {
@@ -214,13 +278,22 @@ func NewResistor(name string, node1, node2 *Node) *Resistor {
 	return r
 }
 
-func NewResistorFromNodes(node1, node2 *Node) *Resistor {
+func NewDrawableResistor(
+	name string,
+	node1, node2 *Node,
+	idleResourceName,
+	selectedResourceName string,
+) *Resistor {
 	r := &Resistor{
 		Node1: node1,
 		Node2: node2,
 	}
 	r.Node1.Parent = r
 	r.Node2.Parent = r
+
+	r.ComponentID.Name = name
+	r.idleResource = loadGridTexture(idleResourceName)
+	r.selectedResource = loadGridTexture(selectedResourceName)
 	return r
 }
 
@@ -250,11 +323,13 @@ func (r *Resistor) Nodes() []*Node {
 	return []*Node{r.Node1, r.Node2}
 }
 
-func (r Resistor) Clone() Component {
+func (r Resistor) Clone(newID ComponentID) Component {
 	node1Copy := *r.Node1
 	node2Copy := *r.Node2
 
 	newResistor := r
+	newResistor.ComponentID = newID
+
 	newResistor.Node1 = &node1Copy
 	newResistor.Node2 = &node2Copy
 	newResistor.Node1.Parent = &newResistor
@@ -262,8 +337,22 @@ func (r Resistor) Clone() Component {
 	return &newResistor
 }
 
-func (r *Resistor) GetRenderData() *RenderData {
-	return &r.RenderData
+func (r *Resistor) Render(s DrawingState) {
+	x, y := r.GetPosition()
+	rl.DrawTexture(r.idleResource, x, y, rl.White)
+	rl.DrawText(r.Name, x, y+gridComponentImageSize, gridComponentFontSize, rl.White)
+
+	if s.state == StateComponentSelected && *s.selectedComponent == r {
+		rl.DrawTexture(r.selectedResource, x, y, rl.White)
+	}
+}
+
+func (r *Resistor) GetID() ComponentID {
+	return r.ComponentID
+}
+
+func (r *Resistor) GetPosition() (int32, int32) {
+	return r.Position.Unpack()
 }
 
 func (r *Resistor) Debug() string {
@@ -271,10 +360,13 @@ func (r *Resistor) Debug() string {
 }
 
 type Transistor struct {
+	ComponentID
 	Source *Node
 	Drain  *Node
 	Gate   *Node
-	RenderData
+
+	// Rendering data
+	resource rl.Texture2D
 }
 
 func NewTransistor(name string, source, gate, drain *Node) *Transistor {
@@ -289,11 +381,15 @@ func NewTransistor(name string, source, gate, drain *Node) *Transistor {
 	return t
 }
 
-func NewTransistorFromNodes(source, gate, drain *Node) *Transistor {
+func NewDrawableTransistor(name string, source, gate, drain *Node, resourceName string) *Transistor {
 	t := &Transistor{Source: source, Drain: drain, Gate: gate}
 	t.Source.Parent = t
 	t.Drain.Parent = t
 	t.Gate.Parent = t
+
+	t.ComponentID.Name = name
+	t.resource = loadGridTexture(resourceName)
+
 	return t
 }
 
@@ -333,12 +429,14 @@ func (t *Transistor) Nodes() []*Node {
 	return []*Node{t.Source, t.Gate, t.Drain}
 }
 
-func (t Transistor) Clone() Component {
+func (t Transistor) Clone(newID ComponentID) Component {
 	sourceCopy := *t.Source
 	gateCopy := *t.Gate
 	drainCopy := *t.Drain
 
 	newTransistor := t
+	newTransistor.ComponentID = newID
+
 	newTransistor.Source = &sourceCopy
 	newTransistor.Gate = &gateCopy
 	newTransistor.Drain = &drainCopy
@@ -350,13 +448,29 @@ func (t Transistor) Clone() Component {
 	return &newTransistor
 }
 
-func (t *Transistor) GetRenderData() *RenderData {
-	return &t.RenderData
+func (t *Transistor) Render(s DrawingState) {
+	x, y := t.GetPosition()
+	rl.DrawTexture(t.resource, x, y, rl.White)
+	rl.DrawText(t.Name, x, y+gridComponentImageSize, gridComponentFontSize, rl.White)
+
+	if s.state == StateComponentSelected && *s.selectedComponent == t {
+		drawComponentOutline(*s.selectedComponent, rl.Yellow)
+		x, y := (*s.selectedComponent).GetPosition()
+		rl.DrawRectangleLines(x, y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
+	}
+}
+
+func (t *Transistor) GetID() ComponentID {
+	return t.ComponentID
+}
+
+func (t *Transistor) GetPosition() (int32, int32) {
+	return t.Position.Unpack()
 }
 
 func (t *Transistor) Debug() string {
-	return fmt.Sprintf("Transistor<source=%s, gate=%s, drain=%s> (x: %d, y: %d)",
-		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug(), t.RenderData.X, t.RenderData.Y)
+	return fmt.Sprintf("Transistor<source=%s, gate=%s, drain=%s>",
+		t.Source.Debug(), t.Gate.Debug(), t.Drain.Debug())
 }
 
 type CustomComponent struct {
@@ -395,11 +509,19 @@ func (c *CustomComponent) Nodes() []*Node {
 	return []*Node{}
 }
 
-func (c *CustomComponent) GetRenderData() *RenderData {
-	return &RenderData{}
+func (c *CustomComponent) Render(s DrawingState) {
+	// TODO
 }
 
-func (c *CustomComponent) Clone() Component {
+func (c *CustomComponent) GetID() ComponentID {
+	return ComponentID{}
+}
+
+func (c *CustomComponent) GetPosition() (int32, int32) {
+	return 0, 0
+}
+
+func (c *CustomComponent) Clone(overrides ComponentID) Component {
 	// TODO
 	return c
 }

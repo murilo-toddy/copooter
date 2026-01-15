@@ -39,6 +39,17 @@ var (
 	actionButtonSize = int32(30)
 )
 
+const (
+	resistorResourcePath = "./resources/resistor.png"
+)
+
+// Representation of a component on the toolkit, for selection
+type ToolkitComponent struct {
+	resourceName string
+	resource     rl.Texture2D
+	Component
+}
+
 type State int
 
 const (
@@ -51,12 +62,12 @@ const (
 
 type DrawingState struct {
 	state             State
-	toolkitComponents []DrawableComponent
-	components        []DrawableComponent
+	toolkitComponents []ToolkitComponent
+	components        []Component
 	nextComponentID   int
 
-	draggingComponent *DrawableComponent
-	selectedComponent *DrawableComponent
+	draggingComponent *ToolkitComponent
+	selectedComponent *Component
 	selectedNode      *int
 }
 
@@ -77,110 +88,49 @@ func (d *DrawingState) Log() {
 	logMessage += fmt.Sprintf("Current state: %s", state)
 
 	if d.draggingComponent != nil {
-		logMessage += fmt.Sprintf(" | dragging component %s", d.draggingComponent.Name)
+		logMessage += fmt.Sprintf(" | dragging component %s", (*d.draggingComponent).GetID().Name)
 	}
 	if d.selectedComponent != nil {
-		logMessage += fmt.Sprintf(" | selected component %s", d.selectedComponent.Name)
+		logMessage += fmt.Sprintf(" | selected component %s", (*d.selectedComponent).GetID().Name)
 	}
 	if d.selectedNode != nil {
 		if d.selectedComponent == nil {
 			logMessage += fmt.Sprintf(" | selected node %d but component nil", *d.selectedNode)
 		} else {
-			logMessage += fmt.Sprintf(" | selected node %d of %s", *d.selectedNode, d.selectedComponent.Name)
+			logMessage += fmt.Sprintf(" | selected node %d of %s", *d.selectedNode, (*d.selectedComponent).GetID().Name)
 		}
 	}
 	fmt.Println(logMessage)
 }
 
-type DrawableComponent struct {
-	ID   string
-	Name string
-	// TODO: this is not a good way of storing resources for components
-	// that may change based on state, such as input or meter
-	idleResource         rl.Texture2D
-	idleResourceName     string
-	selectedResource     rl.Texture2D
-	selectedResourceName string
-	X                    int32
-	Y                    int32
-	Component
-}
-
-func createComponent(c *DrawableComponent) {
-	// TODO: select component based on type enum instead of name
-	// At this point, name is already updated to contain index,
-	// this should also be a field inside DrawableComponent struct
-	// type DrawableComponent struct {
-	//     componentType Enum
-	//     index         int
-	// }
-
-	// TODO: ideally we would need to set only the component
-	// and the terminals would be derived automatically
-
-	// TODO: remove extra mumbo jumbo once DrawableComponent and Component are integrated
-	if strings.HasPrefix(c.Name, "Resistor") {
-		resistor := NewResistor(c.Name, nil, nil)
-		resistor.RenderData.X = c.X
-		resistor.RenderData.Y = c.Y
-
-		c.Component = resistor
-		return
-	} else if strings.HasPrefix(c.Name, "Transistor") {
-		transistor := NewTransistor(c.Name, nil, nil, nil)
-		transistor.RenderData.X = c.X
-		transistor.RenderData.Y = c.Y
-		c.Component = transistor
-		return
-	} else if strings.HasPrefix(c.Name, "Multimeter") {
-		meter := NewMultimeter(c.Name, nil)
-		meter.RenderData.X = c.X
-		meter.RenderData.Y = c.Y
-		c.Component = meter
-		return
-	} else if strings.HasPrefix(c.Name, "Ground") {
-		ground := NewGround(c.Name, nil)
-		ground.RenderData.X = c.X
-		ground.RenderData.Y = c.Y
-		c.Component = ground
-		return
-	} else if strings.HasPrefix(c.Name, "Source") {
-		source := NewSource(c.Name, nil)
-		source.RenderData.X = c.X
-		source.RenderData.Y = c.Y
-		c.Component = source
-		return
-	} else if strings.HasPrefix(c.Name, "Input") {
-		input := NewInput(c.Name, nil, Off)
-		input.RenderData.X = c.X
-		input.RenderData.Y = c.Y
-		c.Component = input
-		return
-	}
-	fmt.Println("Component type not found for ", c.Name)
-}
-
-func addComponent(s *DrawingState, c DrawableComponent) {
+func addComponent(s *DrawingState, c Component, p Position) {
 	n := 1
 	for _, existingComponent := range s.components {
-		if strings.HasPrefix(existingComponent.Name, c.Name) {
+		if strings.HasPrefix(existingComponent.GetID().Name, c.GetID().Name) {
 			n++
 		}
 	}
+	newName := fmt.Sprintf("%s %d", c.GetID().Name, n)
+	s.components = append(s.components, c.Clone(ComponentID{
+		Name: newName, ID: getNextID(s), Position: Position{p.X, p.Y},
+	}))
+}
 
-	c.Name = fmt.Sprintf("%s %d", c.Name, n)
+func loadTextureWithSize(resourcePath string, width, height int32) (t rl.Texture2D) {
+	if resourcePath != "" {
+		image := rl.LoadImage(resourcePath)
+		rl.ImageResize(image, width, height)
+		t = rl.LoadTextureFromImage(image)
+	}
+	return
+}
 
-	newComponent := c.Component.Clone()
+func loadToolboxTexture(resourcePath string) rl.Texture2D {
+	return loadTextureWithSize(resourcePath, toolkitComponentImageSize, toolkitComponentImageSize)
+}
 
-	// set x,y coordinates of new component
-	newR := newComponent.GetRenderData()
-	newR.X = c.X
-	newR.Y = c.Y
-
-	c.Component = newComponent
-
-	setComponentID(s, &c)
-	s.components = append(s.components, c)
+func loadGridTexture(resourcePath string) rl.Texture2D {
+	return loadTextureWithSize(resourcePath, gridComponentImageSize, gridComponentImageSize)
 }
 
 // Select component from toolbox
@@ -190,7 +140,8 @@ func checkToolkitComponentSelected(s *DrawingState, pos rl.Vector2) {
 			componentIndex := int32(pos.Y) / toolkitComponentBoxSize
 			if componentIndex < int32(len(s.toolkitComponents)) {
 				selectedComponent := s.toolkitComponents[componentIndex]
-				selectedComponent.idleResource = loadTextureWithSize(selectedComponent.idleResourceName, gridComponentImageSize, gridComponentImageSize)
+				selectedComponent.resource = loadGridTexture(selectedComponent.resourceName)
+
 				// enter dragging state
 				s.draggingComponent = &selectedComponent
 				s.state = StateDragging
@@ -205,9 +156,7 @@ func checkComponentDropped(s *DrawingState, pos rl.Vector2) {
 		if isInsideSchematic(pos) {
 			x, y := snapToGrid(pos)
 			component := *s.draggingComponent
-			component.X = x
-			component.Y = y
-			addComponent(s, component)
+			addComponent(s, component, Position{x, y})
 		}
 		// release dragging component and reset state to idle
 		s.draggingComponent = nil
@@ -244,8 +193,8 @@ func checkNewComponentSelected(s *DrawingState, pos rl.Vector2) {
 func checkNodeSelected(s *DrawingState, pos rl.Vector2) {
 	if rl.IsMouseButtonReleased(rl.MouseButtonLeft) {
 		if s.selectedComponent != nil && isInsideComponent(pos, *s.selectedComponent) {
-			for nodeIndex, node := range s.selectedComponent.Nodes() {
-				if isInsideNode(pos, *s.selectedComponent, node) {
+			for nodeIndex, node := range (*s.selectedComponent).Nodes() {
+				if isInsideNode(pos, node) {
 					s.selectedNode = &nodeIndex
 					s.state = StateNodeSelected
 					return
@@ -257,7 +206,7 @@ func checkNodeSelected(s *DrawingState, pos rl.Vector2) {
 
 func checkChangeInputComponentState(s *DrawingState) {
 	if rl.IsKeyPressed(rl.KeyEnter) {
-		terminal, ok := s.selectedComponent.Component.(*Terminal)
+		terminal, ok := (*s.selectedComponent).(*Terminal)
 		if !ok {
 			return
 		}
@@ -279,10 +228,10 @@ func checkConnectNodes(s *DrawingState, pos rl.Vector2) {
 			fmt.Println("Attempting to connect terminal but selected component is nil")
 			return
 		}
-		selectedTerminal := s.selectedComponent.Nodes()[*s.selectedNode]
+		selectedTerminal := (*s.selectedComponent).Nodes()[*s.selectedNode]
 		for _, component := range s.components {
 			for _, term := range component.Nodes() {
-				if isInsideNode(pos, component, term) {
+				if isInsideNode(pos, term) {
 					selectedTerminal.Connect(term)
 					return
 				}
@@ -296,7 +245,7 @@ func checkConnectNodes(s *DrawingState, pos rl.Vector2) {
 
 func checkRemoveConnections(s *DrawingState) {
 	if rl.IsKeyPressed(rl.KeyD) {
-		s.selectedComponent.Nodes()[*s.selectedNode].DisconnectAll()
+		(*s.selectedComponent).Nodes()[*s.selectedNode].DisconnectAll()
 	}
 }
 
@@ -309,20 +258,11 @@ func checkPlayButtonSelected(s *DrawingState, pos rl.Vector2) {
 	}
 }
 
-func loadTextureWithSize(resourcePath string, width, height int32) (t rl.Texture2D) {
-	if resourcePath != "" {
-		image := rl.LoadImage(resourcePath)
-		rl.ImageResize(image, width, height)
-		t = rl.LoadTextureFromImage(image)
-	}
-	return
-}
-
-func drawComponentsToolbox(drawableComponents []DrawableComponent) {
+func drawComponentsToolbox(drawableComponents []ToolkitComponent) {
 	rl.DrawRectangle(0, 0, toolkitSidebarSize, height, rl.NewColor(48, 48, 48, 255))
 	for i, component := range drawableComponents {
-		rl.DrawTexture(component.idleResource, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitComponentPadding/2, rl.White)
-		rl.DrawText(component.Name, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitSidebarSize, toolkitComponentNameFontSize, rl.White)
+		rl.DrawTexture(component.resource, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitComponentPadding/2, rl.White)
+		rl.DrawText(component.Component.GetID().Name, toolkitComponentPadding/2, int32(i)*toolkitComponentBoxSize+toolkitSidebarSize, toolkitComponentNameFontSize, rl.White)
 	}
 }
 
@@ -336,8 +276,8 @@ func drawGridLines() {
 }
 
 func getTerminalCoordinates(n *Node) (float32, float32) {
-	r := n.Parent.GetRenderData()
-	return float32(r.X) + float32(gridComponentImageSize)*n.OffsetX, float32(r.Y) + float32(gridComponentImageSize)*n.OffsetY
+	x, y := n.Parent.GetPosition()
+	return float32(x) + float32(gridComponentImageSize)*n.OffsetX, float32(y) + float32(gridComponentImageSize)*n.OffsetY
 }
 
 func minAndDist(v1, v2 int32) (int32, int32) {
@@ -357,50 +297,17 @@ func drawWire(fromX, fromY, toX, toY int32, color rl.Color) {
 	}
 }
 
-func drawSchematicComponents(components []DrawableComponent) {
-	for _, component := range components {
-		if component.X == 0 && component.Y == 0 {
-			continue
-		}
-		rl.DrawTexture(component.idleResource, component.X, component.Y, rl.White)
-		rl.DrawText(component.Name, component.X, component.Y+gridComponentImageSize, gridComponentFontSize, rl.White)
-		for _, term := range component.Nodes() {
-			termX, termY := getTerminalCoordinates(term)
-			var color rl.Color
-			switch term.State {
-			case Off:
-				color = rl.White
-			case On:
-				color = rl.Yellow
-			case Undefined:
-				color = rl.White
-			default:
-				panic("unreachable state")
-			}
-			for _, conn := range term.connections {
-				connX, connY := getTerminalCoordinates(conn)
-				if termX > connX {
-					drawWire(int32(termX), int32(termY), int32(termX), int32(connY), color)
-					drawWire(int32(termX), int32(connY), int32(connX), int32(connY), color)
-				} else {
-					drawWire(int32(termX), int32(termY), int32(connX), int32(termY), color)
-					drawWire(int32(connX), int32(termY), int32(connX), int32(connY), color)
-				}
-			}
-		}
-	}
-}
-
 func isInsideSquare(pos rl.Vector2, x, y, w, h int32) bool {
 	posX, posY := int32(pos.X), int32(pos.Y)
 	return posX >= x && posX <= x+w && posY >= y && posY <= y+h
 }
 
-func isInsideComponent(pos rl.Vector2, c DrawableComponent) bool {
-	return isInsideSquare(pos, c.X, c.Y, gridComponentImageSize, gridComponentImageSize)
+func isInsideComponent(pos rl.Vector2, c Component) bool {
+	x, y := c.GetPosition()
+	return isInsideSquare(pos, x, y, gridComponentImageSize, gridComponentImageSize)
 }
 
-func isInsideNode(pos rl.Vector2, c DrawableComponent, term *Node) bool {
+func isInsideNode(pos rl.Vector2, term *Node) bool {
 	termCenterX, termCenterY := getTerminalCoordinates(term)
 	r := gridComponentTerminalRadius
 	return pos.X >= termCenterX-r && pos.X <= termCenterX+r &&
@@ -418,14 +325,16 @@ func snapToGrid(pos rl.Vector2) (int32, int32) {
 	return (x / gridCellSize * gridCellSize) + toolkitSidebarSize, y / gridCellSize * gridCellSize
 }
 
-func drawComponentOutline(c DrawableComponent, color rl.Color) {
-	rl.DrawRectangleLines(c.X, c.Y, gridComponentImageSize, gridComponentImageSize, color)
+func drawComponentOutline(c Component, color rl.Color) {
+	x, y := c.GetPosition()
+	rl.DrawRectangleLines(x, y, gridComponentImageSize, gridComponentImageSize, color)
 }
 
-func drawTerminal(c DrawableComponent, n *Node, color rl.Color) {
+func drawTerminal(c Component, n *Node, color rl.Color) {
+	x, y := c.GetPosition()
 	rl.DrawCircle(
-		c.X+int32(float32(gridComponentImageSize)*n.OffsetX),
-		c.Y+int32(float32(gridComponentImageSize)*n.OffsetY),
+		x+int32(float32(gridComponentImageSize)*n.OffsetX),
+		y+int32(float32(gridComponentImageSize)*n.OffsetY),
 		gridComponentTerminalRadius,
 		color,
 	)
@@ -444,19 +353,17 @@ func drawPlayButton() {
 	)
 }
 
-func setComponentID(s *DrawingState, c *DrawableComponent) {
-	c.ID = fmt.Sprintf("%d", s.nextComponentID)
+func getNextID(s *DrawingState) string {
+	id := s.nextComponentID
 	s.nextComponentID += 1
+	return fmt.Sprintf("%d", id)
 }
 
-func NewDrawableComponent(name string, idleResourceName string, selectedResourceName string, component Component) DrawableComponent {
-	return DrawableComponent{
-		Name:                 name,
-		idleResourceName:     idleResourceName,
-		idleResource:         loadTextureWithSize(idleResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		selectedResource:     loadTextureWithSize(selectedResourceName, toolkitComponentImageSize, toolkitComponentImageSize),
-		selectedResourceName: selectedResourceName,
-		Component:            component,
+func NewToolkitComponent(resourceName string, component Component) ToolkitComponent {
+	return ToolkitComponent{
+		resourceName: resourceName,
+		resource:     loadToolboxTexture(resourceName),
+		Component:    component,
 	}
 }
 
@@ -466,47 +373,45 @@ func main() {
 
 	s := DrawingState{
 		state: StateIdle,
-		toolkitComponents: []DrawableComponent{
-			NewDrawableComponent(
-				"Resistor",
-				"./resources/resistor.png", "./resources/resistor-selected.png",
-				NewResistorFromNodes(&Node{OffsetX: 0.0, OffsetY: 0.5}, &Node{OffsetX: 1.0, OffsetY: 0.5}),
+		toolkitComponents: []ToolkitComponent{
+			// TODO: remove copy of resource name
+			NewToolkitComponent(
+				resistorResourcePath,
+				NewDrawableResistor(
+					"Resistor",
+					&Node{OffsetX: 0.0, OffsetY: 0.5}, &Node{OffsetX: 1.0, OffsetY: 0.5},
+					resistorResourcePath, "./resources/resistor-selected.png",
+				),
 			),
-			NewDrawableComponent(
-				"Transistor",
-				"./resources/transistor.jpg", "",
-				NewTransistorFromNodes(
+			NewToolkitComponent(
+				"./resources/transistor.jpg",
+				NewDrawableTransistor(
+					"Transistor",
 					&Node{OffsetX: 0.6, OffsetY: 0.05},
 					&Node{OffsetX: 0.05, OffsetY: 0.5},
 					&Node{OffsetX: 0.6, OffsetY: 0.95},
+					"./resources/transistor.jpg",
 				),
 			),
-			NewDrawableComponent(
-				"Source",
-				"./resources/source.png", "",
-				NewSourceFromNodes(&Node{OffsetX: 0.5, OffsetY: 0.05}),
+			NewToolkitComponent(
+				"./resources/source.png",
+				NewDrawableSource("Source", &Node{OffsetX: 0.5, OffsetY: 0.05}, "./resources/source.png"),
 			),
-			NewDrawableComponent(
-				"Ground",
-				"./resources/ground.png", "",
-				NewGroundFromNodes(&Node{OffsetX: 0.5, OffsetY: 0.05}),
+			NewToolkitComponent(
+				"./resources/ground.png",
+				NewDrawableGround("Ground", &Node{OffsetX: 0.5, OffsetY: 0.05}, "./resources/ground.png"),
 			),
-			NewDrawableComponent(
-				"Multimeter",
-				"./resources/meter.jpg", "",
-				NewMultimeterFromNodes(&Node{OffsetX: 0.3, OffsetY: 0.5}),
+			NewToolkitComponent(
+				"./resources/meter.jpg",
+				NewDrawableMultimeter("Multimeter", &Node{OffsetX: 0.3, OffsetY: 0.5}, "./resources/meter.jpg"),
 			),
-			NewDrawableComponent(
-				"Input",
-				"./resources/input.jpg", "",
-				NewInputFromNodes(&Node{OffsetX: 0.7, OffsetY: 0.5}, Off),
+			NewToolkitComponent(
+				"./resources/input.jpg",
+				NewDrawableInput("Input", &Node{OffsetX: 0.7, OffsetY: 0.5}, Off, "./resources/input.jpg"),
 			),
 		},
 	}
 
-	for _, component := range s.toolkitComponents {
-		defer rl.UnloadTexture(component.idleResource)
-	}
 	for !rl.WindowShouldClose() {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.NewColor(12, 12, 12, 255))
@@ -533,36 +438,52 @@ func main() {
 
 		// Render
 		drawGridLines()
-		drawSchematicComponents(s.components)
+
+		for _, component := range s.components {
+			component.Render(s)
+			for _, term := range component.Nodes() {
+				termX, termY := getTerminalCoordinates(term)
+				var color rl.Color
+				switch term.State {
+				case Off:
+					color = rl.White
+				case On:
+					color = rl.Yellow
+				case Undefined:
+					color = rl.White
+				default:
+					panic("unreachable state")
+				}
+				for _, conn := range term.connections {
+					connX, connY := getTerminalCoordinates(conn)
+					if termX > connX {
+						drawWire(int32(termX), int32(termY), int32(termX), int32(connY), color)
+						drawWire(int32(termX), int32(connY), int32(connX), int32(connY), color)
+					} else {
+						drawWire(int32(termX), int32(termY), int32(connX), int32(termY), color)
+						drawWire(int32(connX), int32(termY), int32(connX), int32(connY), color)
+					}
+				}
+			}
+		}
+
 		drawComponentsToolbox(s.toolkitComponents)
 		// draw different things depending on current state
 		switch s.state {
 		case StateDragging:
 			offset := toolkitComponentImageSize / 2
 			x, y := int32(mousePos.X)-offset, int32(mousePos.Y)-offset
-			rl.DrawTexture(s.draggingComponent.idleResource, x, y, rl.White)
+
+			rl.DrawTexture(s.draggingComponent.resource, x, y, rl.White)
 		case StateComponentSelected:
-			if s.selectedComponent.selectedResourceName != "" {
-				if s.selectedComponent.selectedResource.ID <= 0 {
-					s.selectedComponent.selectedResource = loadTextureWithSize(
-						s.selectedComponent.selectedResourceName,
-						gridComponentImageSize,
-						gridComponentImageSize,
-					)
-				}
-				rl.DrawTexture(s.selectedComponent.selectedResource, s.selectedComponent.X, s.selectedComponent.Y, rl.White)
-			} else {
-				drawComponentOutline(*s.selectedComponent, rl.Yellow)
-				rl.DrawRectangleLines(s.selectedComponent.X, s.selectedComponent.Y, gridComponentImageSize, gridComponentImageSize, rl.Yellow)
-			}
-			for _, term := range s.selectedComponent.Nodes() {
+			for _, term := range (*s.selectedComponent).Nodes() {
 				drawTerminal(*s.selectedComponent, term, rl.Red)
 			}
 		case StateNodeSelected:
 			for _, component := range s.components {
 				for termIndex, term := range component.Nodes() {
 					var color rl.Color
-					if component.ID == s.selectedComponent.ID && termIndex == *s.selectedNode {
+					if component.GetID().ID == (*s.selectedComponent).GetID().ID && termIndex == *s.selectedNode {
 						color = rl.Blue
 					} else {
 						color = rl.Red
@@ -573,8 +494,8 @@ func main() {
 		case StateSimulating:
 			components := make([]Component, len(s.components))
 			for i, component := range s.components {
-				component.Component.Reset()
-				components[i] = component.Component
+				component.Reset()
+				components[i] = component
 			}
 			circuit := NewCircuit(components, 50, true)
 			if err := circuit.Tick(); err != nil {
